@@ -1,0 +1,14 @@
+# Decode: one token per request. Where launches and weight loads dominate (Claim 1's best case).
+name: decode
+impls: all
+warmup: 20
+reps: 200
+flush_l2: true
+grid:
+  num_requests: [1, 2, 4, 8, 16, 32, 64, 128, 256]
+  tokens_per_request: 1
+  h_in: [4096, 8192]
+  h_out: [4096, 8192]
+  r_max: [64, 128]
+  dist: [all_min, all_max, uniform, skew_low, skew_high]
+  dtype: fp16
