@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# RankFuse
+results/raw/
+results/ncu/
+results/slurm-*.out
+*.ncu-rep
+*.nsys-rep
+third_party/*/build/

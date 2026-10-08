@@ -1,0 +1,14 @@
+# Prefill: many tokens per request. Where x/y traffic dominates and Claim 2 is hardest.
+name: prefill
+impls: all
+warmup: 10
+reps: 50
+flush_l2: true
+grid:
+  num_requests: [1, 4, 16]
+  tokens_per_request: [128, 512]
+  h_in: 4096
+  h_out: 4096
+  r_max: [64, 128]
+  dist: [all_min, all_max, uniform, skew_low, skew_high]
+  dtype: fp16

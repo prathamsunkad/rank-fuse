@@ -1,0 +1,14 @@
+# Tiny sweep that runs in seconds on a laptop CPU. Use it to check the harness, not for numbers.
+name: smoke
+impls: all
+warmup: 2
+reps: 10
+flush_l2: false
+grid:
+  num_requests: [1, 8]
+  tokens_per_request: [1, 4]
+  h_in: 512
+  h_out: 512
+  r_max: 32
+  dist: [uniform, skew_low]
+  dtype: fp32

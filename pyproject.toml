@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rankfuse"
+version = "0.0.1"
+description = "Mixed-rank MatryoshkaLoRA serving kernels and baselines"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.3", "pyyaml"]
+
+[project.optional-dependencies]
+gpu = ["triton"]
+analysis = ["matplotlib"]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["rankfuse*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
