@@ -1,0 +1,101 @@
+"""RankFuse v1: rank-aware shrink + expand, masked per token.
+
+Two Triton kernels (same split as Punica's SGMV shrink/expand), launched over the whole batch:
+
+    shrink:  v[t, :r_b] = x[t] @ A_t[:r_b].T        r_b = largest rank in the batch
+             columns k >= token_ranks[t] are written as 0 (masked, not computed if possible)
+    expand:  y[t]       = v[t, :r_t] @ B[:r_t]       reduction stops at each token's own rank
+
+Why two kernels and not one fused kernel: every output tile of y needs the full v row, which
+needs a reduction over all of h_in. A single kernel would recompute v once per h_out tile.
+Try fusing later as an experiment (see docs/PLAN.md).
+
+Layouts (rankfuse/interface.py):
+    x      [T, h_in]        row-major
+    A_t    [r_max, h_in]    rank-r prefix = rows [:r], contiguous
+    B      [r_max, h_out]   rank-r prefix = rows [:r], contiguous
+    v      [T, r_b]         intermediate, allocated by the wrapper
+    y      [T, h_out]       output (LoRA delta only)
+
+Things to watch:
+* tl.dot needs every block dimension >= 16, so BLOCK_R >= 16 even when ranks are 4 or 8.
+* Decode batches have very few tokens; a separate matrix-vector path may beat tl.dot there.
+* Accumulate in fp32, store in x.dtype.
+
+Develop on Phoenix. `TRITON_INTERPRET=1 python -m pytest -k rf1_masked` runs the kernels in
+Triton's CPU interpreter (Linux only), which is slow but allows print debugging.
+"""
+
+import torch
+import triton
+import triton.language as tl
+
+from rankfuse.interface import MatryoshkaLoRA, apply_scale, register  # noqa: F401
+
+
+@triton.jit
+def _shrink_kernel(
+    x_ptr, a_t_ptr, v_ptr, ranks_ptr,
+    T, H_IN, R,
+    stride_xt, stride_xh,
+    stride_ar, stride_ah,
+    stride_vt, stride_vr,
+    BLOCK_T: tl.constexpr, BLOCK_R: tl.constexpr, BLOCK_K: tl.constexpr,
+):
+    """v[t, k] = sum_h x[t, h] * A_t[k, h]  for k < token_ranks[t], else 0.
+
+    Grid: (cdiv(T, BLOCK_T), cdiv(R, BLOCK_R)), one program per (token tile, rank tile).
+
+    Each program should:
+    1. Compute its token offsets and rank offsets from the program ids.
+    2. Load token_ranks for its token tile. If the rank tile starts at or beyond the largest
+       rank in the token tile, write zeros and return early (no wasted work).
+    3. Loop over h_in in chunks of BLOCK_K: load an x tile [BLOCK_T, BLOCK_K] and an A_t tile
+       [BLOCK_R, BLOCK_K], accumulate tl.dot(x_tile, tl.trans(a_tile)) in fp32.
+    4. Zero entries where rank offset >= that token's rank.
+    5. Store the [BLOCK_T, BLOCK_R] tile to v, masking out-of-bounds tokens and ranks.
+    """
+    pass
+
+
+@triton.jit
+def _expand_kernel(
+    v_ptr, b_ptr, y_ptr, ranks_ptr,
+    T, H_OUT, R,
+    stride_vt, stride_vr,
+    stride_br, stride_bh,
+    stride_yt, stride_yh,
+    BLOCK_T: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_R: tl.constexpr,
+):
+    """y[t, n] = sum_{k < token_ranks[t]} v[t, k] * B[k, n].
+
+    Grid: (cdiv(T, BLOCK_T), cdiv(H_OUT, BLOCK_N)), one program per (token tile, output tile).
+
+    Each program should:
+    1. Compute its token offsets and output-column offsets from the program ids.
+    2. Load token_ranks for its token tile; the rank loop only needs to reach the largest
+       rank in this tile, not R.
+    3. Loop over ranks in chunks of BLOCK_R: load a v tile [BLOCK_T, BLOCK_R] (masking
+       k >= each token's rank) and a B tile [BLOCK_R, BLOCK_N], accumulate tl.dot in fp32.
+    4. Store the [BLOCK_T, BLOCK_N] tile to y in y's dtype, masking out-of-bounds entries.
+    """
+    pass
+
+
+# Uncomment once the kernels pass tests/test_correctness.py on Phoenix. Registered before
+# then, the empty kernels would fail the GPU tests and stop the sweep job.
+# @register("rf1_masked", requires_cuda=True)
+def rf1_masked(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> torch.Tensor:
+    """Host wrapper with the shared signature: (x [T, h_in], lora, token_ranks [T]) -> y [T, h_out].
+
+    Should:
+    1. Check inputs are on CUDA, contiguous, and share a dtype; token_ranks is int32.
+    2. r_b = int(token_ranks.max()); allocate v [T, r_b] and y [T, h_out] in x.dtype.
+    3. Launch _shrink_kernel over (cdiv(T, BLOCK_T), cdiv(r_b, BLOCK_R)).
+    4. Launch _expand_kernel over (cdiv(T, BLOCK_T), cdiv(h_out, BLOCK_N)).
+    5. Return apply_scale(y, lora, token_ranks).
+
+    Start with fixed block sizes (e.g. BLOCK_T=16, BLOCK_R=16, BLOCK_K=64, BLOCK_N=64);
+    add @triton.autotune once correct.
+    """
+    raise NotImplementedError("rf1_masked: kernels not written yet")

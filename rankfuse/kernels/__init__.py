@@ -1,15 +1,19 @@
-"""RankFuse Triton kernels (not implemented yet).
+"""RankFuse Triton kernels.
 
-Planned, both registered through `rankfuse.interface.register` with the shared signature
-`(x [T, h_in], lora: MatryoshkaLoRA, token_ranks [T]) -> y [T, h_out]`:
+* rankfuse_mask.py   - v1. Rank-aware shrink + expand; columns beyond each token's rank are
+                       masked, and rank tiles beyond a token tile's max rank exit early.
+* rankfuse_ragged.py - v2 (not started). Host builds a list of only the valid
+                       (token tile, rank tile) work items and launches exactly those. Sorting
+                       tokens by rank inside the batch makes tiles uniform.
 
-* rankfuse_mask.py   - v1. Fused shrink + expand. Grid over (token tile, h_out tile); the
-                       rank loop goes to the tile's max rank and masks columns >= each token's
-                       rank. v stays in registers/SMEM (never written to HBM).
-* rankfuse_ragged.py - v2. Host builds a list of only the valid (token tile, rank tile) work
-                       items and launches exactly those, so low-rank tokens never touch high
-                       rank tiles. Sorting tokens by rank inside the batch makes tiles uniform.
+Each kernel module registers its wrapper with `rankfuse.interface.register`, so
+tests/test_correctness.py and bench/run_sweep.py pick it up automatically.
 
-Both must pass tests/test_correctness.py (it picks them up automatically from the registry
-once this package imports them).
+Triton is only imported when installed (it is unavailable on Windows/CPU-only machines), so
+`import rankfuse` keeps working there and the kernels are simply absent from the registry.
 """
+
+import importlib.util
+
+if importlib.util.find_spec("triton") is not None:
+    from rankfuse.kernels import rankfuse_mask  # noqa: F401
