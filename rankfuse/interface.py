@@ -79,7 +79,9 @@ class Batch:
     def num_tokens(self) -> int:
         return self.x.shape[0]
 
-
+# defines what an implementation should look like
+# takes in a tensor, the adapter, and the ranks for each token
+# returns the LoRA delta tensor
 class LoRAImpl(Protocol):
     name: str
     requires_cuda: bool
@@ -89,7 +91,8 @@ class LoRAImpl(Protocol):
 
 REGISTRY: dict[str, LoRAImpl] = {}
 
-
+# called using @register("name")
+# def padded(...)
 def register(name: str, requires_cuda: bool = False) -> Callable:
     """Decorator: register a function as a LoRA implementation under `name`."""
 
@@ -103,7 +106,7 @@ def register(name: str, requires_cuda: bool = False) -> Callable:
 
     return wrap
 
-
+# does the scaling based on token_ranks and the provdied scaleperrank
 def apply_scale(y: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> torch.Tensor:
     s = lora.token_scales(token_ranks)
     return y if s is None else y * s.to(y.dtype)

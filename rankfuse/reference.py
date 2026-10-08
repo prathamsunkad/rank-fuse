@@ -15,5 +15,8 @@ def reference(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) 
     for i, r in enumerate(token_ranks.tolist()):
         if r == 0:
             continue
+        # for each token and its rank
+        # compute lora without padding grouping masking or batching
+        # its just over each token
         y[i] = (xf[i] @ A_t[:r].T) @ B[:r]
     return apply_scale(y, lora, token_ranks)
