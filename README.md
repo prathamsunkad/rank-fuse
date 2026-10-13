@@ -10,7 +10,7 @@ rankfuse/
   interface.py        shared contract: MatryoshkaLoRA, Batch, @register, REGISTRY
   reference.py        B0 reference (correctness oracle)
   baselines/          B1 padded+mask, B2 grouped (+ CUDA-graph variant); B3/B4 stubs with plans
-  kernels/            RankFuse Triton kernels (to do)
+  kernels/            RF1 fused-masked and RF2 rank-sorted Triton kernels
   workloads.py        seeded shapes and rank distributions
   roofline.py         analytic bytes/FLOPs/lower-bound per strategy
 tests/                correctness vs B0 for every registered impl; roofline checks

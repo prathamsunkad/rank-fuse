@@ -37,15 +37,34 @@ Every implementation computes the same thing: for each token i with rank r_i, `y
 | B0 | Reference | Python loop per token, fp32 | many | ✓ | ✓ | correctness only |
 | B1 | Padded + mask | `v = x @ A[:, :r_batch_max]`, zero `v[i, r_i:]`, `y = v @ B[:r_batch_max]` | ~3–4 | ✓ | ✗ | Claim 2 (headline) |
 | B2 | Grouped by rank | one matmul pair per distinct rank, gather/scatter tokens | 2 per group | ✓ | ✓ | Claim 2 |
-| B2g | Grouped + CUDA graph | B2 captured in a CUDA graph | 1 replay | ✓ | ✓ | separates launch overhead |
+| B2p | Prepared groups (TODO) | scheduler supplies groups reused across LoRA layers for one stable batch layout | 2 per group | ✓ | ✓ | realistic grouped control |
+| B2g | Grouped + CUDA graph | fixed-layout B2 captured in a CUDA graph | 1 replay | ✓ | ✓ | optimistic graph ablation |
 | B3 | vLLM LoRA ops | each rank registered as its own adapter, padded to max rank | 2 | ✗ | ✗ | Claim 1 |
 | B4 | S-LoRA bgmv (optional) | each rank its own adapter at its true rank | 2 | ✗ | ✓ | Claim 1 |
-| RF1 | RankFuse v1 | fused Triton kernel, rank tiles masked per token | 1 | ✓ | partly | — |
-| RF2 | RankFuse v2 | only valid (token tile, rank tile) work items launched | 1 | ✓ | ✓ | — |
+| RF1 | Fused padded/masked | Triton fusion control; loop to batch max rank and mask per token | 1 | ✓ | ✗ | isolates fusion |
+| RF2 | Fused rank-aware | Triton kernel sorts tokens by rank; each tile stops at its local maximum rank | 1 + sort | ✓ | mostly | tests rank-skipping benefit |
 
 Why B1 masks the **activation** and not the weights: all requests share one A and one B, so the weights can't be masked differently per request in one matmul. Zeroing column k of row i in `v` removes rank component k from request i only.
 
 Why B1 is the hardest baseline: it's two large cuBLAS matmuls that load the shared weights once. Its only waste is FLOPs, and FLOPs aren't the bottleneck.
+
+### Immediate implementation TODOs
+
+1. **B2p:** prepare rank groups once for the current batch layout and reuse them across every
+   LoRA projection/layer while that layout is unchanged. Do not cache them permanently per
+   model: active requests, row order, and group sizes can change. B2p remains unfused and runs
+   gather + two PyTorch matmuls + scatter per rank group.
+2. **RF1 (implemented in Triton):** fused padded/masked control. Keep the intermediate on chip
+   and use B1 vs RF1 to measure fusion, launch, and intermediate-memory benefits.
+3. **RF2 (implemented in Triton):** sort token indices by rank and let each token tile stop at
+   its local maximum rank band. Each output element is computed and written by one GPU
+   program, avoiding the need for atomic additions. Next, accept scheduler-prepared ordering so its cost can be reused across adapted
+   layers.
+4. **Profile:** measure descriptor/sort cost and DRAM/L2 traffic. The goal is better shared-prefix
+   reuse, not an unprovable claim that each weight physically loads once.
+
+The core comparison is the 2x2 of B1/B2p (unfused padded/grouped) and RF1/RF2 (fused
+padded/rank-aware). B2g remains useful only as a fixed-layout upper-bound diagnostic.
 
 B3 is what you'd do with today's most deployed engine. B4 is the best published mixed-rank technique; S-LoRA itself is a 2023 research prototype that is not widely deployed.
 
