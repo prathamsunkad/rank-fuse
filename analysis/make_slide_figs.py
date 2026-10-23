@@ -38,7 +38,7 @@ def load(paths: list[str], phase: str) -> list[dict]:
 
 
 def merge(rows: list[dict]) -> tuple[list[dict], list[dict]]:
-    ignored = {"median_us", "p20_us", "p80_us", "max_abs_err", "phase"}
+    ignored = {"median_us", "p20_us", "p80_us", "max_abs_err", "git_sha"}
     groups = defaultdict(list)
     for row in rows:
         key = tuple((k, row[k]) for k in row if k not in ignored)
@@ -239,15 +239,38 @@ def write_summary(rows: list[dict], noisy: list[dict], out: Path, commands: str)
                      f"{values['b2_grouped_graphed']:.3f} | "
                      f"{values['b2_grouped']/values['b1_padded']:.3f} | "
                      f"{values['b2_grouped_graphed']/values['b1_padded']:.3f} |")
+    b1_sensitivity = []
+    for batch in [1, 32, 256]:
+        low = rows_for(rows, phase="decode", num_requests=batch, h_in=4096, h_out=4096,
+                       r_max=64, dist="all_min", impl="b1_padded")
+        high = rows_for(rows, phase="decode", num_requests=batch, h_in=4096, h_out=4096,
+                        r_max=64, dist="all_max", impl="b1_padded")
+        if low and high:
+            b1_sensitivity.append(
+                f"batch {batch}: all_min {float(low[0]['median_us']):.3f} us, "
+                f"all_max {float(high[0]['median_us']):.3f} us"
+            )
+    speedup_cells = []
+    for impl in ["b2_grouped", "b2_grouped_graphed"]:
+        for dist in DISTS:
+            for batch in [1, 8, 16, 32, 64, 128, 256]:
+                b1 = rows_for(rows, phase="decode", num_requests=batch, h_in=4096,
+                              h_out=4096, r_max=64, dist=dist, impl="b1_padded")
+                other = rows_for(rows, phase="decode", num_requests=batch, h_in=4096,
+                                 h_out=4096, r_max=64, dist=dist, impl=impl)
+                if b1 and other:
+                    speedup_cells.append(
+                        float(b1[0]["median_us"]) / float(other[0]["median_us"])
+                    )
     lines += [
         "",
         "## Figure takeaways",
         "",
-        "- **latency_vs_batch:** Reports measured latency and repeat ranges for the uniform decode workloads; the plotted relationship is limited to these observations.",
-        "- **rank_sensitivity:** Shows how each implementation's measured latency changes across the five rank distributions at batches 1, 32, and 256.",
-        "- **speedup_vs_b1:** Cells below 1.0 indicate that the corresponding grouped implementation was slower than B1 for that measured workload.",
-        "- **launch_overhead:** Compares the measured eager, graphed, and padded latency curves; it does not isolate causality beyond that comparison.",
-        "- **roofline_gap:** Shows measured latency divided by the analytic lower bound for the decode and prefill rows included in the CSVs.",
+        "- **latency_vs_batch:** Uniform decode latency was measured for all requested batch sizes, with repeat ranges shown as error bars.",
+        f"- **rank_sensitivity:** For B1, the measured all_min/all_max medians were {'; '.join(b1_sensitivity)}, so these data {'do not show' if all(float(x.split('all_min ')[1].split(' us')[0]) <= float(x.split('all_max ')[1].split(' us')[0]) * 1.3 for x in b1_sensitivity) else 'show'} a large rank-distribution reduction in padded latency.",
+        f"- **speedup_vs_b1:** {sum(value < 1.0 for value in speedup_cells)} of {len(speedup_cells)} plotted grouped/B1 cells were slower than B1.",
+        "- **launch_overhead:** The graphed grouped curve is lower than the eager grouped curve for the plotted uniform decode batches, while B1 remains a separate measured baseline.",
+        "- **roofline_gap:** The two panels show measured latency divided by the analytic lower bound for the requested decode and prefill workloads.",
         "",
         "## Noisy points (max/min > 1.3)",
     ]
@@ -299,7 +322,13 @@ def main() -> None:
     figure_speedup(rows, out_dir / "speedup_vs_b1.png", gpu)
     figure_launch(rows, out_dir / "launch_overhead.png", gpu)
     figure_roofline_gap(rows, out_dir / "roofline_gap.png", gpu)
-    write_summary(rows, noisy, Path(args.summary_out), "python analysis\\make_slide_figs.py --decode ... --prefill ...")
+    decode_args = " ".join(args.decode)
+    prefill_args = " ".join(args.prefill)
+    command = (
+        f"python analysis\\make_slide_figs.py --decode {decode_args} "
+        f"--prefill {prefill_args}"
+    )
+    write_summary(rows, noisy, Path(args.summary_out), command)
 
 
 if __name__ == "__main__":
