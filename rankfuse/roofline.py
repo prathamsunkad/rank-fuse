@@ -21,7 +21,8 @@ from dataclasses import dataclass
 
 DTYPE_BYTES = {"fp32": 4, "fp16": 2, "bf16": 2}
 
-# Nominal spec-sheet numbers: (HBM bytes/s, dense fp16 tensor FLOP/s).
+# Values are (theoretical bytes/s, dense fp16 FLOP/s). The RTX 4060 Laptop
+# peak is a measured fp16 matmul peak, not a spec number.
 GPUS = {
     "A100-80GB": (2.039e12, 312e12),
     "A100-40GB": (1.555e12, 312e12),
@@ -29,6 +30,7 @@ GPUS = {
     "H100-PCIe": (2.0e12, 756e12),
     "V100": (0.9e12, 125e12),
     "L40S": (0.864e12, 362e12),
+    "RTX4060-Laptop": (256e9, 27.73094e12),
 }
 
 STRATEGIES = ["fused_ideal", "padded", "grouped", "separate_padded", "separate_true"]

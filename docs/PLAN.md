@@ -51,6 +51,10 @@ B3 is what you'd do with today's most deployed engine. B4 is the best published 
 
 ## 4. Back-of-envelope numbers (`python -m rankfuse.roofline`)
 
+The laptop roofline uses 256 GB/s theoretical memory bandwidth and a measured
+27.73094 TFLOP/s fp16 matmul peak for the NVIDIA GeForce RTX 4060 Laptop GPU;
+the latter is a measured fp16 matmul peak, not a spec number.
+
 **Weights.** One decode request at each of ranks 4/8/16/32, h = 4096, fp16:
 
 | Strategy | Weight rows read | Weight data |

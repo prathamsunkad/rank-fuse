@@ -3,6 +3,7 @@
 import pytest
 
 from rankfuse.roofline import cost
+from bench.run_sweep import roofline_gpu_key
 
 H = 4096
 RANKS = [4, 8, 16, 32]  # one decode request per tier
@@ -36,3 +37,7 @@ def test_weight_advantage_shrinks_with_batch():
         return cost("separate_padded", ranks, H, H, 32).total_bytes / cost("fused_ideal", ranks, H, H, 32).total_bytes
 
     assert ratio(1) > 2 * ratio(128)
+
+
+def test_rtx_4060_laptop_key_resolves():
+    assert roofline_gpu_key("NVIDIA GeForce RTX 4060 Laptop GPU") == "RTX4060-Laptop"
