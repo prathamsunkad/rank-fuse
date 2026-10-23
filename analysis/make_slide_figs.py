@@ -71,7 +71,7 @@ def save_csv(path: Path, rows: list[dict]) -> None:
 
 
 def footer(fig, gpu: str) -> None:
-    fig.text(0.5, 0.012, "Preliminary", ha="center", fontsize=14)
+    return
 
 
 def rows_for(rows, **filters):
