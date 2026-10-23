@@ -112,7 +112,8 @@ def main() -> None:
     verify = cfg.get("verify", False) if a.verify is None else a.verify
     impls = sorted(n for n in REGISTRY if n != "b0_reference") if cfg.get("impls", "all") == "all" else cfg["impls"]
     impls = [n for n in impls if not (REGISTRY[n].requires_cuda and a.device != "cuda")]
-    workloads = expand_grid(cfg["grid"])
+    grids = cfg.get("grids", [cfg["grid"]])
+    workloads = [w for grid in grids for w in expand_grid(grid)]
 
     gname = gpu_name()
     gkey = roofline_gpu_key(gname)

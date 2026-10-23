@@ -1,0 +1,21 @@
+name: laptop_decode
+impls: [b1_padded, b2_grouped, b2_grouped_graphed]
+verify: true
+flush_l2: true
+warmup: 30
+reps: 200
+grids:
+  - num_requests: [1, 2, 4, 8, 16, 32, 64, 128, 256]
+    tokens_per_request: 1
+    h_in: 4096
+    h_out: 4096
+    r_max: 64
+    dist: [all_min, all_max, uniform, skew_low, skew_high]
+    dtype: fp16
+  - num_requests: [1, 16, 64, 256]
+    tokens_per_request: 1
+    h_in: 8192
+    h_out: 8192
+    r_max: 128
+    dist: [all_min, all_max, uniform]
+    dtype: fp16

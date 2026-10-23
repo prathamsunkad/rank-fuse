@@ -1,0 +1,14 @@
+name: laptop_prefill
+impls: [b1_padded, b2_grouped, b2_grouped_graphed]
+verify: true
+flush_l2: true
+warmup: 30
+reps: 100
+grid:
+  num_requests: [1, 4]
+  tokens_per_request: [128, 512]
+  h_in: 4096
+  h_out: 4096
+  r_max: 64
+  dist: [all_min, all_max, uniform, skew_low, skew_high]
+  dtype: fp16
