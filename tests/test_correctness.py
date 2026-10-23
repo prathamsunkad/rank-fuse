@@ -74,7 +74,8 @@ def test_graphed_cache_handles_same_shape_different_distributions():
     for dist in ("uniform", "all_min"):
         w = Workload(17, 1, h_in=256, h_out=192, r_max=32, dist=dist, dtype="fp32", seed=17)
         lora, batch = make_lora(w, device), make_batch(w, device)
-        _check("b2_grouped_graphed", lora, batch.x, batch.token_ranks, "fp32", batch.seg_starts)
+        for impl in ("b1_padded_graphed", "b2_grouped_graphed"):
+            _check(impl, lora, batch.x, batch.token_ranks, "fp32", batch.seg_starts)
 
 
 def test_full_rank_equals_plain_lora():

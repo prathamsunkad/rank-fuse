@@ -1,5 +1,5 @@
 name: laptop_prefill
-impls: [b1_padded, b2_grouped, b2_grouped_graphed]
+impls: [b1_padded, b1_padded_graphed, b2_grouped, b2_grouped_graphed]
 verify: true
 flush_l2: true
 warmup: 30

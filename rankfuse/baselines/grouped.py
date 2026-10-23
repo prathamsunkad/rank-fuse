@@ -53,6 +53,10 @@ _GRAPH_CACHE: dict[
         torch.Tensor,
     ],
 ] = {}
+_PADDED_GRAPH_CACHE: dict[
+    tuple,
+    tuple[torch.cuda.CUDAGraph, torch.Tensor, int, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+] = {}
 
 
 @register("b2_grouped_graphed", requires_cuda=True)
@@ -76,5 +80,32 @@ def grouped_graphed(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Te
     return apply_scale(out, lora, token_ranks)
 
 
+@register("b1_padded_graphed", requires_cuda=True)
+def padded_graphed(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> torch.Tensor:
+    key = (x.data_ptr(), tuple(x.shape), lora.A_t.data_ptr(), lora.B.data_ptr(), token_ranks.data_ptr())
+    if key not in _PADDED_GRAPH_CACHE:
+        r = int(token_ranks.max())
+        out = torch.zeros(x.shape[0], lora.h_out, dtype=x.dtype, device=x.device)
+
+        def compute() -> None:
+            v = x @ lora.A_t[:r].T
+            mask = torch.arange(r, device=x.device) < token_ranks.unsqueeze(1)
+            out.copy_((v * mask.to(v.dtype)) @ lora.B[:r])
+
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            compute()
+        torch.cuda.current_stream().wait_stream(stream)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            compute()
+        _PADDED_GRAPH_CACHE[key] = (graph, out, r, x, lora.A_t, lora.B, token_ranks)
+    graph, out, _r, _x, _a_t, _b, _token_ranks = _PADDED_GRAPH_CACHE[key]
+    graph.replay()
+    return apply_scale(out, lora, token_ranks)
+
+
 def clear_graph_cache() -> None:
     _GRAPH_CACHE.clear()
+    _PADDED_GRAPH_CACHE.clear()

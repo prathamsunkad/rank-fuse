@@ -37,6 +37,7 @@ ROOFLINE_STRATEGY = {
     "b1_padded": "padded",
     "b2_grouped": "grouped",
     "b2_grouped_graphed": "grouped",
+    "b1_padded_graphed": "padded",
     "b3_vllm": "separate_padded",
     "b4_slora": "separate_true",
 }
