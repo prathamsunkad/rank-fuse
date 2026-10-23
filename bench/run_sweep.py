@@ -112,7 +112,7 @@ def main() -> None:
     verify = cfg.get("verify", False) if a.verify is None else a.verify
     impls = sorted(n for n in REGISTRY if n != "b0_reference") if cfg.get("impls", "all") == "all" else cfg["impls"]
     impls = [n for n in impls if not (REGISTRY[n].requires_cuda and a.device != "cuda")]
-    grids = cfg.get("grids", [cfg["grid"]])
+    grids = cfg["grids"] if "grids" in cfg else [cfg["grid"]]
     workloads = [w for grid in grids for w in expand_grid(grid)]
 
     gname = gpu_name()
@@ -140,7 +140,7 @@ def main() -> None:
                     )
                     error = float((got.float() - expected.float()).abs().max())
                     verify_errors[name] = error
-                    if not torch.allclose(got, expected, rtol=rtol, atol=atol):
+                    if not torch.allclose(got.float(), expected.float(), rtol=rtol, atol=atol):
                         raise RuntimeError(
                             f"verification failed for {name}: {w} "
                             f"max_abs_err={error:.6g}, rtol={rtol}, atol={atol}"
