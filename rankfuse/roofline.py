@@ -30,7 +30,7 @@ GPUS = {
     "H100-PCIe": (2.0e12, 756e12),
     "V100": (0.9e12, 125e12),
     "L40S": (0.864e12, 362e12),
-    "RTX4060-Laptop": (256e9, 27.73094e12),
+    "RTX-4060-Laptop": (256e9, 27.73094e12),
 }
 
 STRATEGIES = ["fused_ideal", "padded", "grouped", "separate_padded", "separate_true"]

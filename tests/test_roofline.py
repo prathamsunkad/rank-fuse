@@ -40,4 +40,4 @@ def test_weight_advantage_shrinks_with_batch():
 
 
 def test_rtx_4060_laptop_key_resolves():
-    assert roofline_gpu_key("NVIDIA GeForce RTX 4060 Laptop GPU") == "RTX4060-Laptop"
+    assert roofline_gpu_key("NVIDIA GeForce RTX 4060 Laptop GPU") == "RTX-4060-Laptop"
