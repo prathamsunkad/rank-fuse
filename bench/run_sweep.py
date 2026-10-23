@@ -27,6 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import rankfuse  # noqa: E402  (registers implementations)
 from rankfuse import roofline  # noqa: E402
+from rankfuse.baselines.grouped import clear_graph_cache  # noqa: E402
+from rankfuse.debug import TOL  # noqa: E402
 from rankfuse.interface import REGISTRY  # noqa: E402
 from rankfuse.workloads import Workload, make_batch, make_lora  # noqa: E402
 
@@ -102,9 +104,12 @@ def main() -> None:
     p.add_argument("config")
     p.add_argument("--out", default=None, help="CSV path (default: results/raw/<name>-<gpu>-<time>.csv)")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    p.add_argument("--verify", action=argparse.BooleanOptionalAction, default=None,
+                   help="verify each implementation once per workload outside timing")
     a = p.parse_args()
 
     cfg = yaml.safe_load(Path(a.config).read_text())
+    verify = cfg.get("verify", False) if a.verify is None else a.verify
     impls = sorted(n for n in REGISTRY if n != "b0_reference") if cfg.get("impls", "all") == "all" else cfg["impls"]
     impls = [n for n in impls if not (REGISTRY[n].requires_cuda and a.device != "cuda")]
     workloads = expand_grid(cfg["grid"])
@@ -120,6 +125,26 @@ def main() -> None:
     with out.open("w", newline="") as f:
         writer = None
         for w in workloads:
+            clear_graph_cache()
+            verify_errors = {}
+            if verify:
+                verify_lora, verify_batch = make_lora(w, a.device), make_batch(w, a.device)
+                expected = REGISTRY["b0_reference"](
+                    verify_batch.x, verify_lora, verify_batch.token_ranks
+                )
+                rtol, atol = TOL[w.dtype]
+                for name in impls:
+                    got = REGISTRY[name](
+                        verify_batch.x, verify_lora, verify_batch.token_ranks
+                    )
+                    error = float((got.float() - expected.float()).abs().max())
+                    verify_errors[name] = error
+                    if not torch.allclose(got, expected, rtol=rtol, atol=atol):
+                        raise RuntimeError(
+                            f"verification failed for {name}: {w} "
+                            f"max_abs_err={error:.6g}, rtol={rtol}, atol={atol}"
+                        )
+                clear_graph_cache()
             lora, batch = make_lora(w, a.device), make_batch(w, a.device)
             token_ranks = batch.token_ranks.tolist()
             for name in impls:
@@ -134,6 +159,7 @@ def main() -> None:
                     "impl": name, "gpu": gname, "git_sha": sha, **w.as_row(),
                     "batch_max_rank": max(token_ranks), "mean_rank": sum(token_ranks) / len(token_ranks),
                     "median_us": statistics.median(times), "p20_us": q[1], "p80_us": q[7],
+                    "max_abs_err": verify_errors.get(name, ""),
                     "roofline_strategy": strategy, "roofline_bytes": c.total_bytes, "roofline_flops": c.flops,
                     "roofline_us": c.time_s(gkey) * 1e6 if gkey else "",
                 }

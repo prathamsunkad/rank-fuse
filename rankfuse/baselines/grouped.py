@@ -41,7 +41,18 @@ def grouped(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) ->
 
 # Graphs are cached per (x, lora, token_ranks) storage. The benchmark harness reuses the same
 # tensors across repetitions, so the first call captures and later calls only replay.
-_GRAPH_CACHE: dict[tuple, tuple[torch.cuda.CUDAGraph, torch.Tensor]] = {}
+_GRAPH_CACHE: dict[
+    tuple,
+    tuple[
+        torch.cuda.CUDAGraph,
+        torch.Tensor,
+        list[tuple[int, torch.Tensor]],
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ],
+] = {}
 
 
 @register("b2_grouped_graphed", requires_cuda=True)
@@ -59,8 +70,8 @@ def grouped_graphed(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Te
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             _grouped_compute(x, lora, groups, out)
-        _GRAPH_CACHE[key] = (graph, out)
-    graph, out = _GRAPH_CACHE[key]
+        _GRAPH_CACHE[key] = (graph, out, groups, x, lora.A_t, lora.B, token_ranks)
+    graph, out, _groups_keepalive, _x, _a_t, _b, _token_ranks = _GRAPH_CACHE[key]
     graph.replay()
     return apply_scale(out, lora, token_ranks)
 

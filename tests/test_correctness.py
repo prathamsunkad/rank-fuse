@@ -69,6 +69,14 @@ def test_ranks_outside_tiers(impl):
     _check(impl, lora, x, token_ranks, "fp32")
 
 
+def test_graphed_cache_handles_same_shape_different_distributions():
+    device = "cuda" if HAS_CUDA else pytest.skip("requires CUDA")
+    for dist in ("uniform", "all_min"):
+        w = Workload(17, 1, h_in=256, h_out=192, r_max=32, dist=dist, dtype="fp32", seed=17)
+        lora, batch = make_lora(w, device), make_batch(w, device)
+        _check("b2_grouped_graphed", lora, batch.x, batch.token_ranks, "fp32", batch.seg_starts)
+
+
 def test_full_rank_equals_plain_lora():
     """Sanity check on the oracle: rank r_max is ordinary LoRA, x @ A @ B."""
     w = Workload(8, 1, h_in=64, h_out=48, r_max=16, dist="all_max", dtype="fp32")
