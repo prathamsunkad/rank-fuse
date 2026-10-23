@@ -71,8 +71,7 @@ def save_csv(path: Path, rows: list[dict]) -> None:
 
 
 def footer(fig, gpu: str) -> None:
-    fig.text(0.5, 0.012, f"Preliminary | {gpu} | final sweeps on PACE Phoenix",
-             ha="center", fontsize=14)
+    fig.text(0.5, 0.012, "Preliminary", ha="center", fontsize=14)
 
 
 def rows_for(rows, **filters):
@@ -89,7 +88,8 @@ def error_values(row: dict) -> tuple[float, float]:
 
 def figure_latency(rows: list[dict], out: Path, gpu: str) -> None:
     fig, ax = plt.subplots(figsize=(16, 9), facecolor="white")
-    grouped_roofline_drawn = False
+    rooflines = {}
+    impl_handles = {}
     for impl in ORDER:
         data = sorted(
             rows_for(rows, phase="decode", h_in=4096, h_out=4096, r_max=64, dist="uniform", impl=impl),
@@ -99,23 +99,27 @@ def figure_latency(rows: list[dict], out: Path, gpu: str) -> None:
         y = [float(row["median_us"]) for row in data]
         low = [error_values(row)[0] for row in data]
         high = [error_values(row)[1] for row in data]
-        ax.errorbar(x, y, yerr=[low, high], color=PALETTE[impl], marker="o", label=impl,
-                    linewidth=2, capsize=3)
+        errorbar = ax.errorbar(x, y, yerr=[low, high], color=PALETTE[impl], marker="o",
+                               label=impl, linewidth=2, capsize=3)
+        impl_handles[impl] = errorbar.lines[0]
         roof = [float(row["roofline_us"]) for row in data if row["roofline_us"]]
-        if roof and impl != "b2_grouped_graphed":
-            label = "roofline (padded)" if impl == "b1_padded" else "roofline (grouped)"
-            if impl == "b2_grouped" and grouped_roofline_drawn:
-                label = "_nolegend_"
-            ax.plot(x[:len(roof)], roof, "--", color=PALETTE[impl], linewidth=2, label=label)
-            if impl == "b2_grouped":
-                grouped_roofline_drawn = True
+        strategy = "padded" if impl in ("b1_padded", "b1_padded_graphed") else "grouped"
+        if roof and strategy not in rooflines:
+            style = (0, (6, 3)) if strategy == "padded" else (0, (2, 2))
+            label = f"roofline ({strategy})"
+            rooflines[strategy] = ax.plot(
+                x[:len(roof)], roof, linestyle=style, color="0.25",
+                linewidth=2, label=label,
+            )[0]
     ax.set_xscale("log", base=2)
     ax.set_yscale("log")
     ax.set_xlabel("number of tokens (decode batch size)")
     ax.set_ylabel("median latency (us)")
     ax.set_title("Latency vs. batch: decode, uniform ranks, h=4096, r_max=64")
-    ax.plot([], [], "k--", label="roofline")
-    ax.legend()
+    handles = [impl_handles[impl] for impl in ORDER] + [
+        rooflines["padded"], rooflines["grouped"]
+    ]
+    ax.legend(handles=handles, labels=ORDER + ["roofline (padded)", "roofline (grouped)"])
     ax.grid(True, which="both", alpha=0.2)
     footer(fig, gpu)
     fig.tight_layout(rect=(0, 0.04, 1, 1))
@@ -144,14 +148,14 @@ def figure_rank_sensitivity(rows: list[dict], out: Path, gpu: str) -> None:
     axes[0].legend(fontsize=12)
     fig.suptitle("Rank sensitivity: decode latency by rank distribution")
     footer(fig, gpu)
-    fig.tight_layout(rect=(0, 0.04, 1, 0.94))
     fig.savefig(out, dpi=100)
     plt.close(fig)
 
 
 def figure_speedup(rows: list[dict], out: Path, gpu: str) -> None:
     batches = [1, 2, 4, 8, 16, 32, 64, 128, 256]
-    fig, axes = plt.subplots(1, 2, figsize=(16, 9), sharey=True, facecolor="white")
+    fig, axes = plt.subplots(1, 2, figsize=(16, 9), sharey=True, facecolor="white",
+                             constrained_layout=True)
     panels = [
         ("b2_grouped", "b1_padded", "eager / eager"),
         ("b2_grouped_graphed", "b1_padded_graphed", "graphed / graphed"),
@@ -175,18 +179,33 @@ def figure_speedup(rows: list[dict], out: Path, gpu: str) -> None:
         for i in range(len(DISTS)):
             for j in range(len(batches)):
                 if np.isfinite(values[i, j]):
-                    normalized = image.norm(values[i, j])
-                    color = "black" if normalized > 0.42 else "white"
-                    ax.text(j, i, f"{values[i, j]:.2f}", ha="center", va="center",
+                    rgba = image.cmap(image.norm(values[i, j]))
+                    luminance = 0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2]
+                    color = "black" if luminance > 0.55 else "white"
+                    b1_name = b1_impl
+                    b1_row = rows_for(rows, phase="decode", num_requests=batches[j],
+                                      h_in=4096, h_out=4096, r_max=64, dist=DISTS[i],
+                                      impl=b1_name)
+                    impl_row = rows_for(rows, phase="decode", num_requests=batches[j],
+                                        h_in=4096, h_out=4096, r_max=64, dist=DISTS[i],
+                                        impl=impl)
+                    dagger = ""
+                    if b1_row and impl_row and float(b1_row[0]["median_us"]) < 40 and \
+                            float(impl_row[0]["median_us"]) < 40 and \
+                            abs(float(b1_row[0]["median_us"]) - float(impl_row[0]["median_us"])) < 3:
+                        dagger = "†"
+                    ax.text(j, i, f"{values[i, j]:.2f}{dagger}", ha="center", va="center",
                             color=color, fontsize=14, fontweight="bold")
     axes[0].set_ylabel("rank distribution")
     for ax in axes:
         ax.set_xlabel("batch size (requests)")
-    fig.colorbar(image, ax=axes, location="right", fraction=0.04, pad=0.08,
-                 label="speedup vs B1 (>1 = faster than B1)")
+    colorbar = fig.colorbar(image, ax=list(axes), location="right", pad=0.02)
+    colorbar.set_ticks([0.25, 0.5, 1, 2, 4])
+    colorbar.set_ticklabels(["0.25", "0.5", "1", "2", "4"])
+    colorbar.set_label("speedup vs B1 (>1 = faster than B1)")
     fig.suptitle("Speedup vs. B1: like-for-like eager and graphed comparisons")
+    fig.text(0.5, 0.018, "† within timer resolution (~1 us)", ha="center", fontsize=12)
     footer(fig, gpu)
-    fig.tight_layout(rect=(0, 0.04, 1, 0.94))
     fig.savefig(out, dpi=100)
     plt.close(fig)
 
@@ -207,13 +226,17 @@ def figure_launch(rows: list[dict], profiler_rows: list[dict], out: Path, gpu: s
             data = [r for r in profiler_rows if r["impl"] == impl and int(r["num_requests"]) == batch]
             if not data:
                 continue
-            values.append((float(data[0]["event_us"]), float(data[0]["kernel_sum_us"])))
+            sweep = rows_for(rows, phase="decode", num_requests=batch, tokens_per_request=1,
+                             h_in=4096, h_out=4096, r_max=64, dist="uniform", impl=impl)
+            if not sweep:
+                continue
+            values.append((float(sweep[0]["median_us"]), float(data[0]["kernel_sum_us"])))
             labels.append(impl)
             colors.append(PALETTE[impl])
         positions = np.arange(len(labels))
         width = 0.36
         ax.bar(positions - width / 2, [v[0] for v in values], width, color=colors,
-               label="wall time (CUDA events)")
+               label="wall time (sweep median)")
         ax.bar(positions + width / 2, [v[1] for v in values], width, color=colors,
                alpha=0.45, hatch="//", label="GPU kernel time (profiler)")
         ax.set_title(f"batch={batch}")
@@ -273,7 +296,7 @@ def write_summary(rows: list[dict], noisy: list[dict], profiler_rows: list[dict]
         "",
         "## Decode summary (uniform, h=4096, r_max=64)",
         "",
-        "| Batch | B1 padded | B1g padded | B2 grouped | B2g grouped | B2/B1 | B2g/B1g |",
+        "| Batch | B1 padded us | B1g padded us | B2 grouped us | B2g grouped us | B1/B2 speedup | B1g/B2g speedup |",
         "|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for batch in [1, 8, 64, 256]:
@@ -284,8 +307,8 @@ def write_summary(rows: list[dict], noisy: list[dict], profiler_rows: list[dict]
             values[impl] = float(data[0]["median_us"]) if data else float("nan")
         lines.append(f"| {batch} | {values['b1_padded']:.3f} | {values['b1_padded_graphed']:.3f} | "
                      f"{values['b2_grouped']:.3f} | {values['b2_grouped_graphed']:.3f} | "
-                     f"{values['b2_grouped']/values['b1_padded']:.3f} | "
-                     f"{values['b2_grouped_graphed']/values['b1_padded_graphed']:.3f} |")
+                     f"{values['b1_padded']/values['b2_grouped']:.3f} | "
+                     f"{values['b1_padded_graphed']/values['b2_grouped_graphed']:.3f} |")
     b1_sensitivity = []
     for batch in [1, 32, 256]:
         low = rows_for(rows, phase="decode", num_requests=batch, h_in=4096, h_out=4096,
@@ -316,14 +339,16 @@ def write_summary(rows: list[dict], noisy: list[dict], profiler_rows: list[dict]
         "",
         "- **latency_vs_batch:** Uniform decode latency was measured for all requested batch sizes, with repeat ranges shown as error bars; B2 and B2g share one grouped roofline line.",
         f"- **rank_sensitivity:** For B1, the measured all_min/all_max medians were {'; '.join(b1_sensitivity)}, so these data {'do not show' if all(float(x.split('all_min ')[1].split(' us')[0]) <= float(x.split('all_max ')[1].split(' us')[0]) * 1.3 for x in b1_sensitivity) else 'show'} a large rank-distribution reduction in padded latency.",
-        f"- **speedup_vs_b1:** {sum(value < 1.0 for value in speedup_cells)} of {len(speedup_cells)} like-for-like grouped/B1 cells were slower than their matching B1 variant.",
-        "- **launch_overhead:** Profiler measurements show wall time substantially exceeds summed GPU kernel time for eager B1/B2, while graphed variants narrow that gap; grouping and max-rank work are outside the timed graphed calls.",
+        f"- **speedup_vs_b1:** {sum(value < 1.0 for value in speedup_cells)} of {len(speedup_cells)} like-for-like grouped/B1 cells were slower than their matching B1 variant; speedup is always B1 time / implementation time.",
+        "- **launch_overhead:** Eager variants are host-bound (wall time is much larger than kernel sum), while graphed B2 is kernel-bound at batches 32 and 256 (kernel sum is roughly 70-75% of wall time); grouping and max-rank work are outside timed graphed calls.",
         "- **roofline_gap:** The two panels aggregate rank distributions at each workload x position with median lines and min-max bands; values below 1 remain unresolved because the analytic model was not changed.",
         "- **graphed variants:** B1g captures the batch max rank, and B2g captures rank grouping, outside the timed replay; this is a best-case launch-overhead comparison.",
+        "- **timer resolution:** Graphed timings are quantised at about 1.024 us; differences under about 2 us are not meaningful, and min == max for graphed rows reflects quantisation rather than zero noise.",
         "",
         "## Profiling and unresolved roofline observations",
         "",
         "- The machine uses the Windows WDDM driver model.",
+        "- Nsight Compute (`ncu`) was not available on this Windows machine, so DRAM byte counters were not collected.",
         "- Below-roofline B2g rows imply 261-349 GB/s versus the 256 GB/s model entry and 226.99 GB/s measured copy bandwidth; this may reflect optimistic byte accounting and/or cache effects despite L2 flush, and is not treated as proof of a physical bandwidth result.",
         "",
         "### Profiler rows",
@@ -334,6 +359,22 @@ def write_summary(rows: list[dict], noisy: list[dict], profiler_rows: list[dict]
     for row in profiler_rows:
         lines.append(f"| {row['impl']} | {row['num_requests']} | {float(row['event_us']):.3f} | "
                      f"{float(row['kernel_sum_us']):.3f} | {row['kernel_launches']} |")
+    lines += [
+        "",
+        "### Profiler overhead and GPU-busy fraction",
+        "",
+        "| Implementation | Batch | Profiler overhead (profiled wall / sweep wall) | GPU-busy fraction (kernel / sweep wall) |",
+        "|---|---:|---:|---:|",
+    ]
+    for profiler in profiler_rows:
+        sweep = rows_for(rows, phase="decode", num_requests=profiler["num_requests"],
+                         tokens_per_request=1, h_in=4096, h_out=4096, r_max=64,
+                         dist="uniform", impl=profiler["impl"])
+        if sweep:
+            wall = float(sweep[0]["median_us"])
+            lines.append(f"| {profiler['impl']} | {profiler['num_requests']} | "
+                         f"{float(profiler['event_us']) / wall:.3f}x | "
+                         f"{float(profiler['kernel_sum_us']) / wall:.3f} |")
     below = [row for row in rows if float(row["median_us"]) < float(row["roofline_us"])]
     lines += [
         "",
@@ -346,6 +387,24 @@ def write_summary(rows: list[dict], noisy: list[dict], profiler_rows: list[dict]
         implied = float(row["roofline_bytes"]) / (float(row["median_us"]) * 1e-6) / 1e9
         lines.append(f"| {row['phase']} | {row['impl']} | {row['num_requests']} | {row['num_tokens']} | "
                      f"{row['dist']} | {float(row['median_us']):.3f} | {float(row['roofline_us']):.3f} | {implied:.1f} |")
+    lines += [
+        "",
+        "### Batch maximum rank",
+        "",
+        "| Batch size | all_min | skew_low | uniform | skew_high | all_max |",
+        "|---:|---:|---:|---:|---:|---:|",
+    ]
+    for batch in [1, 2, 4, 8, 16, 32, 64, 128, 256]:
+        values = []
+        for dist in DISTS:
+            data = rows_for(rows, phase="decode", num_requests=batch, h_in=4096,
+                            h_out=4096, r_max=64, dist=dist, impl="b1_padded")
+            values.append(data[0]["batch_max_rank"] if data else "—")
+        lines.append(f"| {batch} | " + " | ".join(values) + " |")
+    lines += [
+        "",
+        "B1 pads to the batch maximum rank; with 8 or more requests, mixed-rank batches nearly always reach r_max in these sampled workloads.",
+    ]
     lines += [
         "",
         "## Noisy points (max/min > 1.3)",
