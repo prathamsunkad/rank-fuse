@@ -1,0 +1,18 @@
+# Decode on Qwen2.5-7B projection shapes (hidden 3584, intermediate 18944, 4 KV heads x 128).
+# Confirm against the model's config.json.
+name: qwen25-7b-decode
+impls: all
+warmup: 20
+reps: 200
+flush_l2: true
+shapes:            # projection: [h_in, h_out]
+  q_o: [3584, 3584]
+  k_v: [3584, 512]
+  gate_up: [3584, 18944]
+  down: [18944, 3584]
+grid:
+  num_requests: [1, 2, 4, 8, 16, 32, 64, 128, 256]
+  tokens_per_request: 1
+  r_max: [64, 128]
+  dist: [all_min, all_max, uniform, skew_low, skew_high]
+  dtype: fp16

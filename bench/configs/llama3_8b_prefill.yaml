@@ -1,0 +1,17 @@
+# Prefill on Llama-3.1-8B projection shapes. See llama3_8b_decode.yaml for the shapes.
+name: llama3-8b-prefill
+impls: all
+warmup: 10
+reps: 50
+flush_l2: true
+shapes:            # projection: [h_in, h_out]
+  q_o: [4096, 4096]
+  k_v: [4096, 1024]
+  gate_up: [4096, 14336]
+  down: [14336, 4096]
+grid:
+  num_requests: [1, 4, 16]
+  tokens_per_request: [128, 512]
+  r_max: [64, 128]
+  dist: [all_min, all_max, uniform, skew_low, skew_high]
+  dtype: fp16

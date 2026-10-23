@@ -8,7 +8,8 @@ from rankfuse.interface import MatryoshkaLoRA
 SUPPORTED_DTYPES = {torch.float16, torch.bfloat16, torch.float32}
 
 
-def check_inputs(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> int:
+def check_layout(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> None:
+    """Shape, dtype, device, and contiguity checks. Never reads tensor values, so no host sync."""
     if not x.is_cuda:
         raise ValueError("RankFuse kernels require CUDA tensors")
     if x.ndim != 2 or token_ranks.ndim != 1 or token_ranks.numel() != x.shape[0]:
@@ -23,6 +24,10 @@ def check_inputs(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tenso
         raise ValueError("all inputs must be on the same CUDA device")
     if not all(t.is_contiguous() for t in (x, lora.A_t, lora.B, token_ranks)):
         raise ValueError("RankFuse currently requires contiguous inputs")
+
+
+def check_inputs(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> int:
+    check_layout(x, lora, token_ranks)
     if x.shape[0] == 0:
         return 0
 

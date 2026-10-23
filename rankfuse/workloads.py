@@ -3,26 +3,31 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from typing import Callable
 
 import torch
 
 from rankfuse.interface import Batch, MatryoshkaLoRA
 
-# Probability over rank tiers, ordered smallest -> largest rank.
-DISTRIBUTIONS: dict[str, list[float]] = {
-    "all_min": [1.0, 0.0, 0.0, 0.0],
-    "all_max": [0.0, 0.0, 0.0, 1.0],
-    "uniform": [0.25, 0.25, 0.25, 0.25],
-    "skew_low": [0.4, 0.3, 0.2, 0.1],
-    "skew_high": [0.1, 0.2, 0.3, 0.4],
+# Probability over n rank tiers, ordered smallest -> largest rank. The skews weight tiers
+# linearly (n, n-1, ..., 1): with 4 tiers that is 0.4/0.3/0.2/0.1.
+DISTRIBUTIONS: dict[str, Callable[[int], list[float]]] = {
+    "all_min": lambda n: [1.0] + [0.0] * (n - 1),
+    "all_max": lambda n: [0.0] * (n - 1) + [1.0],
+    "uniform": lambda n: [1.0 / n] * n,
+    "skew_low": lambda n: [(n - i) / (n * (n + 1) / 2) for i in range(n)],
+    "skew_high": lambda n: [(i + 1) / (n * (n + 1) / 2) for i in range(n)],
 }
 
 DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
 
 
 def default_tiers(r_max: int) -> list[int]:
-    """Matryoshka granularities 1/8, 1/4, 1/2, full."""
-    return [r_max // 8, r_max // 4, r_max // 2, r_max]
+    """Matryoshka granularities: powers of two from 1 up to r_max (1, 2, 4, ..., 64 for 64)."""
+    tiers = [1]
+    while tiers[-1] * 2 < r_max:
+        tiers.append(tiers[-1] * 2)
+    return tiers + [r_max] if r_max > 1 else [1]
 
 
 @dataclass(frozen=True)
@@ -53,10 +58,8 @@ class Workload:
 
 
 def sample_request_ranks(w: Workload, gen: torch.Generator) -> list[int]:
-    probs = torch.tensor(DISTRIBUTIONS[w.dist], dtype=torch.float64)
     tiers = w.rank_tiers
-    if len(tiers) != len(probs):
-        raise ValueError(f"distribution {w.dist} has {len(probs)} tiers, workload has {len(tiers)}")
+    probs = torch.tensor(DISTRIBUTIONS[w.dist](len(tiers)), dtype=torch.float64)
     idx = torch.multinomial(probs, w.num_requests, replacement=True, generator=gen)
     return [tiers[i] for i in idx.tolist()]
 

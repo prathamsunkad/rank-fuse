@@ -91,10 +91,22 @@ def time_impl(fn, args, device: str, warmup: int, reps: int, flush_l2: bool) -> 
     return times
 
 
-def expand_grid(grid: dict) -> list[Workload]:
+def expand_grid(grid: dict, shapes: dict | None = None) -> list[tuple[str, Workload]]:
+    """Every combination of the grid values, as (shape name, workload).
+
+    `shapes` maps a projection name to [h_in, h_out] (e.g. a model's q/kv/gate_up/down) and
+    replaces the grid's h_in and h_out; without it, the shape name is "h_in x h_out".
+    """
+    named = [(name, {"h_in": h_in, "h_out": h_out}) for name, (h_in, h_out) in (shapes or {}).items()]
     keys = list(grid)
     values = [v if isinstance(v, list) else [v] for v in grid.values()]
-    return [Workload(**dict(zip(keys, combo))) for combo in itertools.product(*values)]
+    out = []
+    for combo in itertools.product(*values):
+        params = dict(zip(keys, combo))
+        for name, dims in named or [(None, {})]:
+            w = Workload(**{**params, **dims})
+            out.append((name or f"{w.h_in}x{w.h_out}", w))
+    return out
 
 
 def main() -> None:
@@ -107,7 +119,7 @@ def main() -> None:
     cfg = yaml.safe_load(Path(a.config).read_text())
     impls = sorted(n for n in REGISTRY if n != "b0_reference") if cfg.get("impls", "all") == "all" else cfg["impls"]
     impls = [n for n in impls if not (REGISTRY[n].requires_cuda and a.device != "cuda")]
-    workloads = expand_grid(cfg["grid"])
+    workloads = expand_grid(cfg["grid"], cfg.get("shapes"))
 
     gname = gpu_name()
     gkey = roofline_gpu_key(gname)
@@ -119,7 +131,7 @@ def main() -> None:
 
     with out.open("w", newline="") as f:
         writer = None
-        for w in workloads:
+        for shape, w in workloads:
             lora, batch = make_lora(w, a.device), make_batch(w, a.device)
             token_ranks = batch.token_ranks.tolist()
             for name in impls:
@@ -131,7 +143,7 @@ def main() -> None:
                 strategy = ROOFLINE_STRATEGY.get(name, DEFAULT_STRATEGY)
                 c = roofline.cost(strategy, token_ranks, w.h_in, w.h_out, w.r_max, w.dtype)
                 row = {
-                    "impl": name, "gpu": gname, "git_sha": sha, **w.as_row(),
+                    "impl": name, "gpu": gname, "git_sha": sha, "shape": shape, **w.as_row(),
                     "batch_max_rank": max(token_ranks), "mean_rank": sum(token_ranks) / len(token_ranks),
                     "median_us": statistics.median(times), "p20_us": q[1], "p80_us": q[7],
                     "roofline_strategy": strategy, "roofline_bytes": c.total_bytes, "roofline_flops": c.flops,
@@ -142,7 +154,7 @@ def main() -> None:
                     writer.writeheader()
                 writer.writerow(row)
                 f.flush()
-                print(f"  {name:<20} T={w.num_tokens:<5} h={w.h_in:<5} r_max={w.r_max:<4} {w.dist:<9} "
+                print(f"  {name:<20} {shape:<11} T={w.num_tokens:<5} r_max={w.r_max:<4} {w.dist:<9} "
                       f"{row['median_us']:9.1f} us")
 
 

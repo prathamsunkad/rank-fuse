@@ -1,0 +1,18 @@
+# Llama-style projection ratios at 1/16 size. Checks the named-shape path of the harness on a
+# laptop GPU in seconds; not for numbers.
+name: smoke-shapes
+impls: all
+warmup: 2
+reps: 10
+flush_l2: false
+shapes:            # projection: [h_in, h_out]
+  q_o: [256, 256]
+  k_v: [256, 64]
+  gate_up: [256, 896]
+  down: [896, 256]
+grid:
+  num_requests: [1, 8]
+  tokens_per_request: [1, 16]
+  r_max: 32
+  dist: uniform
+  dtype: fp16

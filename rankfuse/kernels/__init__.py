@@ -13,6 +13,13 @@ tests/test_correctness.py and bench/run_sweep.py pick it up automatically.
                        the batch maximum rank, and mask columns >= each token's rank.
                        Keep v on chip. This is intentionally a fused padded/masked strategy;
                        compare B1 vs RF1 to measure fusion and intermediate-traffic savings.
+* rankfuse_fused.py  - rf1_fused and rf2_fused. Same math as rankfuse_mask.py / rankfuse_ragged.py,
+                       but each program computes v once and reuses it across a range of
+                       output column tiles, so the shrink is not repeated per column tile.
+                       rf2_fused sorts tokens by rank and runs each block at its own rank
+                       bucket. Runtime T/r_limit (no per-batch recompiles), one host sync or
+                       none. `rankfuse_lora` adds the serving options: add into an existing
+                       output, several output slices per launch, CUDA-graph capture.
 * rankfuse_ragged.py - RF2, the rank-aware experiment. Sort token indices by rank, then let
                        each token tile loop only to its local maximum band. Each output element
                        is computed and written by one program, so programs do not race to
@@ -32,5 +39,5 @@ Triton is only imported when installed (it is unavailable on Windows/CPU-only ma
 from importlib.util import find_spec
 
 if find_spec("triton") is not None:
-    from rankfuse.kernels import rankfuse_mask, rankfuse_ragged  # noqa: F401
+    from rankfuse.kernels import rankfuse_fused, rankfuse_mask, rankfuse_ragged  # noqa: F401
 
