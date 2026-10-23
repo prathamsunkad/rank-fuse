@@ -119,6 +119,8 @@ GPU: NVIDIA GeForce RTX 4060 Laptop GPU. All figures state that this is a laptop
 ## Dropped or skipped workloads
 
 - None recorded by the figure-generation step.
+- ShareGPT-length trace was skipped: the attempted Hugging Face dataset load failed with `DataFilesNotFoundError`; no fabricated token-length distribution was used.
+- The synthetic rank mixes in `rankfuse/workloads.py` remain the analogue of the adapter-spread workloads used in the compared serving papers.
 
 ## Regeneration commands
 
