@@ -3,6 +3,7 @@
 #   sbatch scripts/ice/sweep.sbatch                                                # Llama-3.1-8B decode
 #   sbatch --export=ALL,CONFIG=bench/configs/llama3_8b_prefill.yaml scripts/ice/sweep.sbatch
 #   sbatch --gres=gpu:h100:1 scripts/ice/sweep.sbatch                              # another GPU type
+#   sbatch --export=ALL,TIMING=eager scripts/ice/sweep.sbatch                      # include launch overhead
 #
 # Headline numbers come from ONE GPU type (H200; H100, then A100 if H200 is unavailable).
 # Results land in results/raw/<config>-<gpu>-<time>.csv with the git commit recorded per row.
@@ -23,4 +24,4 @@ source scripts/ice/env.sh
 CONFIG=${CONFIG:-bench/configs/llama3_8b_decode.yaml}
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
 python -m pytest -q
-python bench/run_sweep.py "$CONFIG"
+python bench/run_sweep.py "$CONFIG" --timing "${TIMING:-graph}"

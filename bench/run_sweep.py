@@ -2,9 +2,21 @@
 
     python bench/run_sweep.py bench/configs/smoke.yaml
     python bench/run_sweep.py bench/configs/decode.yaml --out results/raw/decode.csv
+    python bench/run_sweep.py bench/configs/decode.yaml --timing graph
 
-Timing: CUDA events per repetition (CPU: perf_counter), with an optional L2 flush before each
-repetition so adapter weights start cold, as they would in a real model forward pass.
+Timing (`--timing`, or `timing:` in the config; default eager):
+    eager  CUDA events around each call (CPU: perf_counter). Includes the Python and launch
+           overhead the GPU waits through (~70-110 us per call on ICE nodes for a Triton
+           wrapper), which dominates decode-sized calls.
+    graph  GPU time only. The call is captured once in a CUDA graph with the per-step metadata
+           the implementation's `prepare` builds outside it (batch maximum rank, rank order,
+           block table, ...), as a serving engine would; each repetition replays it
+           `graph_replays` times back to back. An implementation that cannot be captured (host
+           sync inside, no `prepare`) falls back to eager timing, and *_graphed baselines,
+           which replay their own graph, are timed eagerly; the `timing` column says which
+           was used.
+An optional L2 flush before each call keeps adapter weights cold, as in a real forward pass;
+in graph mode the flush runs inside the graph and its own time is subtracted.
 Each row also carries the roofline lower bound for the matching strategy.
 """
 
@@ -91,6 +103,46 @@ def time_impl(fn, args, device: str, warmup: int, reps: int, flush_l2: bool) -> 
     return times
 
 
+def time_graph(fn, args, kwargs, warmup: int, reps: int, replays: int, flush_l2: bool) -> list[float]:
+    """Per-repetition GPU time in microseconds of fn(*args, **kwargs) by CUDA-graph replay.
+
+    Raises if the call cannot be captured (e.g. it reads a value back to the host).
+    """
+    flush = torch.empty(L2_FLUSH_BYTES, dtype=torch.uint8, device="cuda") if flush_l2 else None
+
+    def capture(body):
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):  # warm up (compiles kernels, fills caches) off the capture
+            for _ in range(warmup):
+                body()
+        torch.cuda.current_stream().wait_stream(side)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            body()
+        return graph
+
+    def per_replay_us(graph) -> float:
+        start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+        start.record()
+        for _ in range(replays):
+            graph.replay()
+        end.record()
+        end.synchronize()
+        return start.elapsed_time(end) * 1e3 / replays
+
+    def call():
+        if flush is not None:
+            flush.zero_()
+        fn(*args, **kwargs)
+
+    graph = capture(call)
+    flush_graph = capture(flush.zero_) if flush is not None else None
+    torch.cuda.synchronize()
+    flush_us = statistics.median(per_replay_us(flush_graph) for _ in range(5)) if flush_graph else 0.0
+    return [per_replay_us(graph) - flush_us for _ in range(reps)]
+
+
 def expand_grid(grid: dict, shapes: dict | None = None) -> list[tuple[str, Workload]]:
     """Every combination of the grid values, as (shape name, workload).
 
@@ -114,9 +166,13 @@ def main() -> None:
     p.add_argument("config")
     p.add_argument("--out", default=None, help="CSV path (default: results/raw/<name>-<gpu>-<time>.csv)")
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    p.add_argument("--timing", choices=["eager", "graph"], default=None, help="see above (default: config, else eager)")
     a = p.parse_args()
 
     cfg = yaml.safe_load(Path(a.config).read_text())
+    timing = a.timing or cfg.get("timing", "eager")
+    if timing == "graph" and a.device != "cuda":
+        sys.exit("--timing graph needs CUDA")
     impls = sorted(n for n in REGISTRY if n != "b0_reference") if cfg.get("impls", "all") == "all" else cfg["impls"]
     impls = [n for n in impls if not (REGISTRY[n].requires_cuda and a.device != "cuda")]
     workloads = expand_grid(cfg["grid"], cfg.get("shapes"))
@@ -127,7 +183,7 @@ def main() -> None:
     out = Path(a.out or f"results/raw/{cfg['name']}-{gname.replace(' ', '_')}-{stamp}.csv")
     out.parent.mkdir(parents=True, exist_ok=True)
     sha = git_sha()
-    print(f"{len(workloads)} workloads x {len(impls)} impls on {gname} (roofline: {gkey}) -> {out}")
+    print(f"{len(workloads)} workloads x {len(impls)} impls on {gname} (roofline: {gkey}, timing: {timing}) -> {out}")
 
     with out.open("w", newline="") as f:
         writer = None
@@ -135,15 +191,29 @@ def main() -> None:
             lora, batch = make_lora(w, a.device), make_batch(w, a.device)
             token_ranks = batch.token_ranks.tolist()
             for name in impls:
-                times = time_impl(
-                    REGISTRY[name], (batch.x, lora, batch.token_ranks), a.device,
-                    cfg.get("warmup", 10), cfg.get("reps", 50), cfg.get("flush_l2", True),
-                )
+                impl = REGISTRY[name]
+                if impl.dtypes is not None and batch.x.dtype not in impl.dtypes:
+                    continue
+                args = (batch.x, lora, batch.token_ranks)
+                warmup, reps, flush_l2 = cfg.get("warmup", 10), cfg.get("reps", 50), cfg.get("flush_l2", True)
+                used = timing
+                if timing == "graph" and name.endswith("_graphed"):
+                    used = "eager (graphs itself)"  # replays its own graph; cannot be nested in another
+                elif timing == "graph":
+                    try:
+                        kwargs = impl.prepare(*args) if impl.prepare else {}
+                        times = time_graph(impl, args, kwargs, warmup, reps, cfg.get("graph_replays", 20), flush_l2)
+                    except Exception as e:  # not capturable: time it eagerly instead
+                        torch.cuda.synchronize()
+                        used = "eager (capture failed)"
+                        print(f"  {name}: graph capture failed ({type(e).__name__}); timing eagerly")
+                if used != "graph":
+                    times = time_impl(impl, args, a.device, warmup, reps, flush_l2)
                 q = statistics.quantiles(times, n=10)
                 strategy = ROOFLINE_STRATEGY.get(name, DEFAULT_STRATEGY)
                 c = roofline.cost(strategy, token_ranks, w.h_in, w.h_out, w.r_max, w.dtype)
                 row = {
-                    "impl": name, "gpu": gname, "git_sha": sha, "shape": shape, **w.as_row(),
+                    "impl": name, "gpu": gname, "git_sha": sha, "timing": used, "shape": shape, **w.as_row(),
                     "batch_max_rank": max(token_ranks), "mean_rank": sum(token_ranks) / len(token_ranks),
                     "median_us": statistics.median(times), "p20_us": q[1], "p80_us": q[7],
                     "roofline_strategy": strategy, "roofline_bytes": c.total_bytes, "roofline_flops": c.flops,
