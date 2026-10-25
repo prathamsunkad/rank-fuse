@@ -1,0 +1,62 @@
+---------------------------------------
+Begin Slurm Prolog: Oct-25-2026 09:21:53
+Job ID:    6581552
+User ID:   psunkad3
+Account:   cse
+Job name:  rankfuse-b3
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+NVIDIA H200 | torch 2.13.0+cu130 | triton 3.7.1
+Using default LoRA kernel configs
+correctness: 53/53 checks match B0 (write and add mode each)
+
+=== add-into-output mode, out += delta (us per call, GPU time by graph replay) ===
+workload                     copies max/mean r      B1  B3 vLLM  RF1 sK  RF2 seg  B3/RF1  B3/best
+decode:1:1:uniform                1        1/1    14.4     11.5     6.1      6.4   1.88x    1.88x
+decode:1:1:skew_low               1        1/1    14.7     11.2     6.1      6.4   1.83x    1.83x
+decode:1:1:all_max                1      64/64    15.2     11.2     7.8      7.5   1.44x    1.49x
+decode:8:1:uniform                4       16/5    15.4     12.7     6.1      6.6   2.07x    2.07x
+decode:8:1:skew_low               4        8/2    14.6     14.4     5.8      6.5   2.48x    2.48x
+decode:8:1:all_max                1      64/64    17.8      9.6     7.6      7.6   1.28x    1.28x
+decode:32:1:uniform               7      64/18    18.6     15.3     7.8      7.7   1.95x    1.99x
+decode:32:1:skew_low              7       64/9    18.7     15.7     8.0      7.9   1.97x    1.99x
+decode:32:1:all_max               1      64/64    18.5      9.5     7.8      7.8   1.22x    1.22x
+decode:128:1:uniform              7      64/19    19.2     16.1     8.4      8.8   1.93x    1.93x
+decode:128:1:skew_low             7      64/11    19.4     15.9     8.5      8.7   1.86x    1.86x
+decode:128:1:all_max              1      64/64    19.3     12.9     8.6      8.5   1.51x    1.52x
+decode:512:1:uniform              7      64/18    22.5     22.6    12.9     13.4   1.75x    1.75x
+decode:2048:1:uniform             7      64/18    41.2     52.4    22.8     23.5   2.30x    2.30x
+decode:8192:1:uniform             7      64/18   110.0    161.7    79.4     82.0   2.04x    2.04x
+prompt:4:512:uniform              2        2/2    47.1     43.9    15.5     16.5   2.82x    2.82x
+prompt:16:512:skew_low            4        8/3   114.8    169.9    64.4     66.4   2.64x    2.64x
+prompt:4:2048:uniform             2        2/2   134.8    171.6    64.6     66.7   2.66x    2.66x
+mixed:16x512:r4+r64               2       64/8   110.1    173.7    79.6     75.7   2.18x    2.29x
+
+wrote /storage/ice1/4/7/psunkad3/rankfuse/logs/b3_vllm.json
+=== NCU ===
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+Using default LoRA kernel configs
+Using default LoRA kernel configs
+/storage/ice1/4/7/psunkad3/rankfuse/logs/ncu/b3cmp-b1-t2048.csv
+/storage/ice1/4/7/psunkad3/rankfuse/logs/ncu/b3cmp-b1-t32.csv
+/storage/ice1/4/7/psunkad3/rankfuse/logs/ncu/b3cmp-b3-t2048.csv
+/storage/ice1/4/7/psunkad3/rankfuse/logs/ncu/b3cmp-b3-t32.csv
+/storage/ice1/4/7/psunkad3/rankfuse/logs/ncu/b3cmp-rf1-t2048.csv
+/storage/ice1/4/7/psunkad3/rankfuse/logs/ncu/b3cmp-rf1-t32.csv
+/storage/ice1/4/7/psunkad3/rankfuse/logs/ncu/b3cmp-rf2seg-t2048.csv
+/storage/ice1/4/7/psunkad3/rankfuse/logs/ncu/b3cmp-rf2seg-t32.csv
+---------------------------------------
+Begin Slurm Epilog: Oct-25-2026 09:24:25
+Job ID:        6581552
+User ID:       psunkad3
+Account:       cse
+Job name:      rankfuse-b3
+Resources:     cpu=8,gres/gpu:h200=1,mem=64G,node=1
+Rsrc Used:     cput=00:20:16,vmem=0,walltime=00:02:32,mem=2625248K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-017-9-0
+---------------------------------------

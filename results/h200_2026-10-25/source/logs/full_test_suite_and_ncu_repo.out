@@ -1,0 +1,48 @@
+---------------------------------------
+Begin Slurm Prolog: Oct-25-2026 11:57:35
+Job ID:    6583831
+User ID:   psunkad3
+Account:   cse
+Job name:  val-a
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+  /home/hice1/psunkad3/scratch/rankfuse/env/lib/python3.11/site-packages/torch/cuda/graphs.py:169: UserWarning: The CUDA Graph is empty. This usually means that the graph was attempted to be captured on wrong device or stream. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/cuda/CUDAGraph.cpp:210.)
+    super().capture_end()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1020 passed, 29 skipped, 1 warning in 174.97s (0:02:54)
+Traceback (most recent call last):
+  File "/storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/bench/run_sweep.py", line 229, in <module>
+    main()
+  File "/storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/bench/run_sweep.py", line 171, in main
+    cfg = yaml.safe_load(Path(a.config).read_text())
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hice1/psunkad3/scratch/rankfuse/env/lib/python3.11/pathlib.py", line 1058, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/hice1/psunkad3/scratch/rankfuse/env/lib/python3.11/pathlib.py", line 1044, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/tmp/claude-3601247/-storage-ice1-4-7-psunkad3/fe1a94d4-17c6-461d-a3da-e8f1ef2a3db2/scratchpad/val_sweep.yaml'
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/tmp/claude-3601247/-storage-ice1-4-7-psunkad3/fe1a94d4-17c6-461d-a3da-e8f1ef2a3db2/scratchpad/val_sweep.yaml'
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/ncu/rf1_fused-r32-t1-4096x4096-r64-uniform-fp16.ncu-repz
+wrote results/ncu/rf1_fused-r32-t1-4096x4096-r64-uniform-fp16.csv
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/ncu/b3_vllm-r32-t1-4096x4096-r64-uniform-fp16.ncu-repz
+wrote results/ncu/b3_vllm-r32-t1-4096x4096-r64-uniform-fp16.csv
+b3_vllm-r32-t1-4096x4096-r64-uniform-fp16.csv 4 kernels; DRAM read MB: 0.0 | units 0.004096
+rf1_fused-r32-t1-4096x4096-r64-uniform-fp16.csv 2 kernels; DRAM read MB: 0.0 | units 794.368000
+---------------------------------------
+Begin Slurm Epilog: Oct-25-2026 12:01:34
+Job ID:        6583831
+User ID:       psunkad3
+Account:       cse
+Job name:      val-a
+Resources:     cpu=8,gres/gpu:h200=1,mem=64G,node=1
+Rsrc Used:     cput=00:31:52,vmem=0,walltime=00:03:59,mem=3031636K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-017-23-0
+---------------------------------------

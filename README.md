@@ -4,6 +4,8 @@ Triton-based kernel for efficient heterogeneous-rank MatryoshkaLoRA serving.
 Design, claims, baselines and milestones: **[docs/PLAN.md](docs/PLAN.md)**; the Matryoshka-LoRA
 serving plan and its status: **[docs/PLAN_MATLORA.md](docs/PLAN_MATLORA.md)**; how the kernels work,
 with measured results: **[docs/ALGORITHMS.md](docs/ALGORITHMS.md)**.
+Every measured result so far (tables as Markdown and CSV, raw data, rebuild script):
+**[results/h200_2026-10-25/](results/h200_2026-10-25/README.md)**.
 
 ## Layout
 
