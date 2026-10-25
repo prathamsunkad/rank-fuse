@@ -4,13 +4,33 @@ This document fixes the project scope and lays out every step from the current k
 end-to-end serving results. It extends [PLAN.md](PLAN.md), which stays the reference for the
 operator-level claims, baselines, and repository conventions.
 
-Status as of 2026-10-22, all verified on an RTX 3050 (630 tests passing):
+Status as of 2026-10-25, verified on one NVIDIA H200 on PACE ICE (vLLM 0.32.0, PyTorch 2.13.0,
+Triton 3.7.1; 1020 tests passing, 29 skipped: B3 in fp32). How the kernels work and every number below:
+[ALGORITHMS.md](ALGORITHMS.md).
 
-* Done: P1.1 (`rf2_fused`), P1.2 (named real-model shapes in the sweep; Llama-3.1-8B and
-  Qwen2.5-7B configs), P1.5 (`b1_padded_graphed`), P2.1 (`scripts/make_adapters.py`),
-  P3.1–P3.3 (`rankfuse_lora`: add into output, output slices, CUDA-graph capture).
-* Not started: everything that needs Linux or the cluster (P0, P1.3, P1.4, P1.6, P1.7, P2.2, P4
-  onward) and the Stage 2 kernel (P3.4).
+* Done:
+  * P0.1–P0.3: H200 as the headline GPU, `requirements-lock.txt`, `scripts/ice/` (env, check,
+    sweep, ncu). P0.4 in part: Qwen2.5-0.5B-Instruct as the development model, loading in stock
+    vLLM with every generated adapter (`scripts/ice/vllm_lora_check.py`); the 7–8B headline
+    model is not chosen yet. P0.5: `docs/VLLM_LORA_NOTES.md`.
+  * P1.1: `rf2_fused`, plus three RF2 variants on the split-K design: `rf2_splitk` (sorted),
+    `rf2_segment` (blocks of consecutive tokens) and `rf2_bucketed` (one kernel pair per rank
+    bucket, chosen per batch by `use_rf2`). P1.2. P1.3: `b3_vllm`. P1.5. P1.6 in part: ncu
+    (`scripts/ice/ncu_profile.sh`); nsys launch counts not done. P1.7 in part: `rf1_fused`
+    re-tuned by hand for the H200 (split-K shrink, multi-wave and tiled expand); no autotuning.
+  * P2.1. P2.2: `bench/vllm_step_time.py` (LoRA share of a stock vLLM step) and
+    `bench/model_forward.py` (whole-model forward in PyTorch with every backend, an early P5.1
+    without vLLM).
+  * P3.1–P3.3 (`rankfuse_lora`: add into output, output slices, CUDA-graph capture).
+* Results (H200, fp16, CUDA-graph replay): one 4096 × 4096 layer, `rf1_fused` is 2.1–2.4× faster
+  than B1 at 1–128 tokens, 1.3–1.7× at 256–2048, 1.07× at 4096 and even at 8192; 1.9–2.8× faster
+  than B3.
+  Whole Qwen2.5-0.5B forward: 1.38–1.47× faster than with B1 and 1.12–1.31× than with B3 at
+  decode. LoRA is 8–52% of a stock vLLM decode step for that model. RF2 gains 10–15% only on
+  large mixed-rank prompts.
+* Next: a lean launch path for `rf1_fused` (about 108 µs of Python per eager call; vLLM runs
+  long prompts eagerly, where RF1 is 0.80–0.85× of B1 today), sweeps on 7–8B shapes, P4, P1.4
+  and the Stage 2 kernel (P3.4).
 
 ---
 
@@ -324,11 +344,11 @@ Suggested split for four people: two on kernels (P1.1, P1.7, P3), one on baselin
 ## 8. Repository layout additions
 
 ```
-rankfuse/kernels/      rankfuse_fused.py (done), RF2 v2, add-into-output, slices, multi-adapter
-rankfuse/baselines/    vllm_ops.py (B3), slora_bgmv.py (B4), graphed B1
+rankfuse/kernels/      rankfuse_fused.py, rankfuse_rf2_*.py (done), multi-adapter
+rankfuse/baselines/    vllm_ops.py (B3, done), slora_bgmv.py (B4), graphed B1 (done)
 rankfuse/integration/  small adapter layer between vLLM's LoRA calls and RankFuse ops
 bench/configs/         real-model shapes
-bench/model_forward.py Level 2
+bench/model_forward.py Level 2 in PyTorch (done); bench/vllm_step_time.py stock vLLM (done)
 bench/serving/         Level 3 load generator and result collection
 scripts/ice/           env setup, sweeps, ncu/nsys, model forward, serving jobs
 scripts/make_adapters.py
