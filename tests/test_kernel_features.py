@@ -221,3 +221,93 @@ def test_b1_graphed_repeated_replays():
     torch.cuda.synchronize()
     _assert_close(first, expected, torch.float32)
     _assert_close(second, expected, torch.float32)
+
+
+# RF2 variants (rankfuse_rf2_*.py). Their registered wrappers take one adapter; these tests cover
+# add mode, an output column view and graph capture with per-step metadata built before capture.
+RF2_VARIANTS = pytest.mark.parametrize("name", ["rf2_splitk", "rf2_segment", "rf2_bucketed"])
+
+
+def _rf2_lora(T, h_in, n, r_max, dtype, seed, ranks=None):
+    x, A_t, B, token_ranks = _inputs(T, h_in, [n], r_max, dtype, seed=seed, ranks=ranks)
+    return x, MatryoshkaLoRA(A_t=A_t[0], B=B[0].contiguous()), token_ranks
+
+
+def _rf2_metadata(name, x, token_ranks):
+    """What a serving engine would build once per step, outside the graph."""
+    r_limit = int(token_ranks.max())
+    if name == "rf2_splitk":
+        return dict(r_limit=r_limit, order=torch.argsort(token_ranks, stable=True))
+    if name == "rf2_segment":
+        from rankfuse.kernels.rankfuse_rf2_segment import block_m_for, contig_blocks
+
+        bm = block_m_for(x.shape[0], r_limit)
+        return dict(r_limit=r_limit, blocks=contig_blocks(x.shape[0], bm, x.device), bm=bm)
+    from rankfuse.kernels.rankfuse_rf2_bucketed import Plan
+
+    return dict(plan=Plan(token_ranks.tolist(), x.device))
+
+
+@RF2_VARIANTS
+@DTYPES
+@pytest.mark.parametrize("T", [37, 300], ids=["decode-37", "prefill-300"])
+def test_rf2_add_into_column_view(name, dtype, T):
+    """add=True into a column view of a larger buffer, with rank-0 rows; columns outside the
+    view and rank-0 rows inside it stay unchanged."""
+    ranks = [[0, 4, 8, 16, 32, 64][i % 6] for i in range(T)]
+    x, lora, token_ranks = _rf2_lora(T, 192, 160, 64, dtype, seed=13, ranks=ranks)
+    buffer = torch.randn(T, 260, device="cuda", dtype=dtype)
+    before = buffer.clone()
+    REGISTRY[name](x, lora, token_ranks, out=buffer[:, 40:200], add=True)
+    expected = before[:, 40:200].float() + REGISTRY["b0_reference"](x, lora, token_ranks).float()
+    _assert_close(buffer[:, 40:200], expected, dtype)
+    assert torch.equal(buffer[:, :40], before[:, :40]) and torch.equal(buffer[:, 200:], before[:, 200:])
+
+
+@RF2_VARIANTS
+@pytest.mark.parametrize("T", [29, 300], ids=["decode-29", "prefill-300"])
+def test_rf2_cuda_graph_capture_and_replay(name, T):
+    """Metadata built before capture, no host sync inside: replay on new x. rf2_splitk and
+    rf2_segment are also replayed on new ranks (a stale order or block table stays correct);
+    rf2_bucketed's plan fixes the ranks, so it is replayed on the same ones."""
+    x, lora, token_ranks = _rf2_lora(T, 128, 96, 32, torch.float32, seed=14)
+    meta = _rf2_metadata(name, x, token_ranks)
+    out = torch.empty(T, 96, device="cuda")
+
+    def run():
+        REGISTRY[name](x, lora, token_ranks, out=out, **meta)
+
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        run()
+    torch.cuda.current_stream().wait_stream(stream)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        run()
+
+    x2, _, ranks2 = _rf2_lora(T, 128, 96, 32, torch.float32, seed=15)
+    x.copy_(x2)
+    if name != "rf2_bucketed":
+        token_ranks.copy_(ranks2)
+    graph.replay()
+    torch.cuda.synchronize()
+    _assert_close(out, REGISTRY["b0_reference"](x, lora, token_ranks), torch.float32)
+
+
+def test_rf2_bucketed_sequential_matches_concurrent():
+    x, lora, token_ranks = _rf2_lora(300, 256, 192, 64, torch.float16, seed=16)
+    impl = REGISTRY["rf2_bucketed"]
+    torch.testing.assert_close(impl(x, lora, token_ranks, concurrent=False), impl(x, lora, token_ranks))
+
+
+def test_rf2_segment_aligned_blocks():
+    """Blocks that never cross a request (aligned_blocks) give the same result as contig blocks."""
+    from rankfuse.kernels.rankfuse_rf2_segment import aligned_blocks
+
+    seg_lens, seg_ranks = [70, 5, 130, 1], [8, 64, 2, 32]
+    ranks = [r for n, r in zip(seg_lens, seg_ranks) for _ in range(n)]
+    x, lora, token_ranks = _rf2_lora(len(ranks), 128, 96, 64, torch.float32, seed=17, ranks=ranks)
+    blocks = aligned_blocks(seg_lens, 64, x.device)
+    out = REGISTRY["rf2_segment"](x, lora, token_ranks, r_limit=64, blocks=blocks, bm=64)
+    _assert_close(out, REGISTRY["b0_reference"](x, lora, token_ranks), torch.float32)
