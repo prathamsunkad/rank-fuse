@@ -85,6 +85,11 @@ class Batch:
 class LoRAImpl(Protocol):
     name: str
     requires_cuda: bool
+    dtypes: tuple[torch.dtype, ...] | None  # None: every dtype the tests use
+    # Optional: (x, lora, token_ranks) -> keyword arguments a serving engine would build once
+    # per step (batch maximum rank, rank order, block table, ...). Passing them removes the
+    # call's host syncs, so benchmarks can capture it in a CUDA graph.
+    prepare: Callable[..., dict] | None
 
     def __call__(self, x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> torch.Tensor: ...
 
@@ -93,12 +98,23 @@ REGISTRY: dict[str, LoRAImpl] = {}
 
 # called using @register("name")
 # def padded(...)
-def register(name: str, requires_cuda: bool = False) -> Callable:
-    """Decorator: register a function as a LoRA implementation under `name`."""
+def register(
+    name: str,
+    requires_cuda: bool = False,
+    dtypes: tuple[torch.dtype, ...] | None = None,
+    prepare: Callable[..., dict] | None = None,
+) -> Callable:
+    """Decorator: register a function as a LoRA implementation under `name`.
+
+    dtypes limits the input dtypes the implementation supports (tests skip the others);
+    prepare is described in LoRAImpl.
+    """
 
     def wrap(fn: Callable) -> Callable:
         fn.name = name
         fn.requires_cuda = requires_cuda
+        fn.dtypes = dtypes
+        fn.prepare = prepare
         if name in REGISTRY:
             raise ValueError(f"duplicate implementation name: {name}")
         REGISTRY[name] = fn

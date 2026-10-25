@@ -201,7 +201,7 @@ import triton
 import triton.language as tl
 
 from rankfuse.interface import MatryoshkaLoRA, register
-from rankfuse.kernels._common import SUPPORTED_DTYPES, check_layout
+from rankfuse.kernels._common import SUPPORTED_DTYPES, check_layout, prepare_r_limit, prepare_rank_order
 
 BLOCK_H = 64
 BLOCK_N = 64
@@ -830,7 +830,7 @@ def rankfuse_lora(
     return out
 
 
-@register("rf1_fused", requires_cuda=True)
+@register("rf1_fused", requires_cuda=True, prepare=prepare_r_limit)
 def rankfuse_fused(
     x: torch.Tensor,
     lora: MatryoshkaLoRA,
@@ -849,7 +849,7 @@ def rankfuse_fused(
     )
 
 
-@register("rf1_single", requires_cuda=True)
+@register("rf1_single", requires_cuda=True, prepare=prepare_r_limit)
 def rankfuse_single(
     x: torch.Tensor,
     lora: MatryoshkaLoRA,
@@ -864,7 +864,7 @@ def rankfuse_single(
     )
 
 
-@register("rf2_fused", requires_cuda=True)
+@register("rf2_fused", requires_cuda=True, prepare=prepare_rank_order)
 def rankfuse_fused_ragged(
     x: torch.Tensor,
     lora: MatryoshkaLoRA,

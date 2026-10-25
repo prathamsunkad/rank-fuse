@@ -15,7 +15,7 @@ import torch
 import rankfuse
 from rankfuse.debug import compare
 from rankfuse.interface import REGISTRY, MatryoshkaLoRA
-from rankfuse.workloads import DISTRIBUTIONS, Workload, make_batch, make_lora
+from rankfuse.workloads import DISTRIBUTIONS, DTYPES, Workload, make_batch, make_lora
 
 HAS_CUDA = torch.cuda.is_available()
 IMPLS = sorted(n for n in REGISTRY if n != "b0_reference")
@@ -27,6 +27,8 @@ def _device_and_skip(impl_name: str, dtype: str) -> str:
         pytest.skip("requires CUDA")
     if dtype != "fp32" and not HAS_CUDA:
         pytest.skip("half precision tested on GPU only")
+    if REGISTRY[impl_name].dtypes is not None and DTYPES[dtype] not in REGISTRY[impl_name].dtypes:
+        pytest.skip(f"{impl_name} does not support {dtype}")
     return "cuda" if HAS_CUDA else "cpu"
 
 

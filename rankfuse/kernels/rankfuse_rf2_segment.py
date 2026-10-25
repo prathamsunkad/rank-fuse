@@ -213,7 +213,14 @@ def rf2_segment(x, A_t, B, token_ranks, r_limit, blocks, bm, out=None, add=False
     return out
 
 
-@register("rf2_segment", requires_cuda=True)
+def prepare(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> dict:
+    """Per-step metadata: batch maximum rank and a contig block table."""
+    r_limit = int(token_ranks.max()) if token_ranks.numel() else 0
+    bm = block_m_for(x.shape[0], r_limit)
+    return dict(r_limit=r_limit, blocks=contig_blocks(x.shape[0], bm, x.device), bm=bm)
+
+
+@register("rf2_segment", requires_cuda=True, prepare=prepare)
 def rankfuse_rf2_segment(
     x: torch.Tensor,
     lora: MatryoshkaLoRA,

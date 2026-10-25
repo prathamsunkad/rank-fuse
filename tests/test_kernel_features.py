@@ -245,7 +245,7 @@ def _rf2_metadata(name, x, token_ranks):
         return dict(r_limit=r_limit, blocks=contig_blocks(x.shape[0], bm, x.device), bm=bm)
     from rankfuse.kernels.rankfuse_rf2_bucketed import Plan
 
-    return dict(plan=Plan(token_ranks.tolist(), x.device))
+    return dict(plan=Plan(token_ranks, x.device))
 
 
 @RF2_VARIANTS

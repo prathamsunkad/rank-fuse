@@ -24,7 +24,7 @@ import triton.language as tl
 
 from rankfuse.interface import MatryoshkaLoRA, register
 from rankfuse.kernels import rankfuse_fused as rf
-from rankfuse.kernels._common import check_layout
+from rankfuse.kernels._common import check_layout, prepare_rank_order
 
 
 @triton.jit
@@ -192,7 +192,7 @@ def rf2_splitk(x, A_t, B, token_ranks, r_limit, order=None, out=None, add=False,
     return out
 
 
-@register("rf2_splitk", requires_cuda=True)
+@register("rf2_splitk", requires_cuda=True, prepare=prepare_rank_order)
 def rankfuse_rf2_splitk(
     x: torch.Tensor,
     lora: MatryoshkaLoRA,

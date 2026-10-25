@@ -16,9 +16,14 @@ import torch
 from rankfuse.interface import MatryoshkaLoRA, apply_scale, register
 
 
-@register("b1_padded")
-def padded(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> torch.Tensor:
-    r = int(token_ranks.max())
+def _prepare_r_b(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> dict:
+    return dict(r_b=int(token_ranks.max()))
+
+
+@register("b1_padded", prepare=_prepare_r_b)
+def padded(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor, r_b: int | None = None) -> torch.Tensor:
+    """r_b: batch maximum rank, if known (removes the host sync, so the call can be graph-captured)."""
+    r = int(token_ranks.max()) if r_b is None else r_b
     v = x @ lora.A_t[:r].T  # [T, r]
     mask = torch.arange(r, device=x.device) < token_ranks.unsqueeze(1)  # [T, r]
     v = v * mask.to(v.dtype)

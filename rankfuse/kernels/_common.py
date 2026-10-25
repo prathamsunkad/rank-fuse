@@ -44,3 +44,13 @@ def token_scales(lora: MatryoshkaLoRA, token_ranks: torch.Tensor, fallback: torc
 
 def dtype_flags(dtype: torch.dtype) -> tuple[bool, bool]:
     return dtype == torch.float32, dtype == torch.bfloat16
+
+
+def prepare_r_limit(x: torch.Tensor, lora, token_ranks: torch.Tensor) -> dict:
+    """Per-step metadata for `register(prepare=...)`: the batch maximum rank."""
+    return dict(r_limit=int(token_ranks.max()) if token_ranks.numel() else 0)
+
+
+def prepare_rank_order(x: torch.Tensor, lora, token_ranks: torch.Tensor) -> dict:
+    """Per-step metadata for the sorted RF2 kernels: batch maximum rank and stable rank order."""
+    return dict(prepare_r_limit(x, lora, token_ranks), order=torch.argsort(token_ranks, stable=True))
