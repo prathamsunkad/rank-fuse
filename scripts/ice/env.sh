@@ -9,7 +9,7 @@
 #     env/            conda environment
 #     hf/             model downloads
 #     adapters/       generated Matryoshka adapters
-#     cache/          pip, conda and Triton caches
+#     cache/          pip, conda, Triton, vLLM and kernel-library caches
 #
 # Override the folder (or any single path) before sourcing, e.g. `export RF_ROOT=/path`.
 
@@ -21,6 +21,14 @@ export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-$RF_ROOT/cache/triton}
 export PIP_CACHE_DIR=${PIP_CACHE_DIR:-$RF_ROOT/cache/pip}
 export CONDA_PKGS_DIRS=${CONDA_PKGS_DIRS:-$RF_ROOT/cache/conda-pkgs}   # default is ~/.conda/pkgs (home quota)
 export PYTHONNOUSERSITE=1   # ignore packages pip-installed with --user into ~/.local for other projects
+# vLLM and the kernel libraries it brings write to ~/.cache, ~/.config, ~/.tilelang and ~/.humming
+export VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT:-$RF_ROOT/cache/vllm}
+export VLLM_CONFIG_ROOT=${VLLM_CONFIG_ROOT:-$RF_ROOT/cache/vllm-config}
+export FLASHINFER_WORKSPACE_BASE=${FLASHINFER_WORKSPACE_BASE:-$RF_ROOT/cache/flashinfer}   # FlashInfer appends .cache/flashinfer
+export TILELANG_CACHE_DIR=${TILELANG_CACHE_DIR:-$RF_ROOT/cache/tilelang}
+export HUMMING_CACHE_DIR=${HUMMING_CACHE_DIR:-$RF_ROOT/cache/humming}
+export HUMMING_TMP_DIR=${HUMMING_TMP_DIR:-$RF_ROOT/cache/humming/tmp}
+export VLLM_NO_USAGE_STATS=1 DO_NOT_TRACK=1   # no usage reports from cluster nodes
 
 module load anaconda3
 eval "$(conda shell.bash hook)"
