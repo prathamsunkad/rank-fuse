@@ -1,8 +1,10 @@
 """RF1 and RF2 (fused): LoRA kernels that compute the shrink once per program.
 
-    rf1_fused  pad every token to the batch maximum rank and mask per token (B1's math)
-    rf2_fused  the same, but tokens are sorted by rank and each token block stops at its own
-               maximum rank, so low-rank blocks load and multiply fewer rank rows
+    rf1_fused   pad every token to the batch maximum rank and mask per token (B1's math), on
+                the split-K path of section 8 (two kernels)
+    rf1_single  the same math in ONE kernel (sections 3-4), kept as the fusion ablation
+    rf2_fused   the same, but tokens are sorted by rank and each token block stops at its own
+                maximum rank, so low-rank blocks load and multiply fewer rank rows
 
 Both are thin wrappers around `rankfuse_lora`, which also takes the options a serving engine
 needs: adding into an existing output, several output slices in one launch (fused QKV or
@@ -114,6 +116,8 @@ add=True); every other read of x, A_t and B by a second program is usually serve
                     works), which removes every host sync.
     order           rf2 only: a precomputed rank-sorted token order (the scheduler can build it
                     once per step and reuse it across layers). Default: torch.argsort.
+    split_k         rf1 only. None (default): the split-K path of section 8 with an automatic
+                    slice count; 0: the single-kernel path; n >= 1: split-K with about n slices.
 
 CUDA graphs: with r_limit passed, rankfuse_lora makes no host syncs and allocates nothing but
 `out` (when not given) and rf2's sort. Call it once before capture so the kernels compile and
@@ -145,6 +149,49 @@ r_limit and cols_per_prog are runtime arguments, so a new batch size does not re
 * Every token rank is <= r_limit. When the caller passes r_limit this is trusted, not
   checked: a larger rank would be silently truncated to r_limit.
 * Offsets are int32, so T * h and r_max * h must stay below 2**31.
+
+=====================================================================================
+8. Split-K path (rf1_fused)
+=====================================================================================
+
+Measured on an H200 (4096 x 4096, r_max 64), the single kernel loses to B1 in a CUDA graph
+for two reasons:
+
+    decode        each program reduces all of h_in alone, one BH chunk after another, with
+                  about one program per SM: the kernel waits on a long chain of loads
+    long prompts  each program expands a BM x (h_out / n_split) strip in BN-wide steps, again
+                  with one program per SM: the output writes reach about a tenth of HBM bandwidth
+
+The split-K path runs two kernels:
+
+    _rf1_shrink_splitk_kernel  grid (m_tiles, S, n_slices). Program (m, k, s) reduces slice k
+        of h_in (K_PER inputs, a whole number of BH chunks) for token block m and stores its
+        partial v [BM, R_PAD] in fp32 to ws[s, k, tok, :]. The slices run in parallel, so the
+        longest chain of dependent loads is K_PER / BH steps instead of h_in / BH. S is chosen
+        so that m_tiles * S * n_slices is about SPLITK_WAVES x the SM count (at most
+        MAX_SPLIT_K); cuBLAS splits B1's shrink the same way.
+    _rf1_expand_splitk_kernel  grid (m_tiles, n_split, n_slices). Each program sums the S
+        partials of its tokens, applies the rank mask and the scale (both linear per token, so
+        they commute with the sum), casts v and runs the expand over its column range, adding
+        into out with add=True as before. n_split aims at EXPAND_WAVES programs per SM, so
+        several programs share an SM and overlap their loads and stores.
+    _rf1_expand_tile_kernel  above EXPAND_TILED_MIN_TOKENS tokens, instead of the kernel above:
+        grid (m_tiles, cdiv(h_out, BN), n_slices), every program owns ONE BM x
+        EXPAND_TILED_BLOCK_N output tile and has no column loop (thousands of programs at long
+        prompts, which keeps many output writes in flight). The shrink then uses at least
+        MIN_SPLIT_K_TILED slices (on an H200: 4 at 2048 tokens, 2 at 4096 and 8192).
+
+Both expand kernels take ALIGNED: when every slice width (hence every offset) is a multiple
+of 16, the kernel is told so with tl.multiple_of, which lets the output stores be vectorized.
+Slice offsets come from a table in memory, so the compiler cannot infer this; without the
+hint the stores go out one element at a time (the expand at 8192 tokens took 67 instead of 45
+us). Single projections and vLLM's fused q/k/v and gate/up layouts are all aligned.
+
+ws is [n_slices, S, T, R_PAD] fp32, allocated per call (inside a CUDA-graph capture it comes
+from the graph's memory pool). At T = 32 with S = 16 it is 128 KiB and stays in L2. Rank-0
+rows need no special case: their v is masked to zero. The shrink's pipeline depth, then BH,
+shrink when one stage of x and A_t tiles would not fit in shared memory (fp32 inputs,
+r_max 128-256, GPUs with less shared memory).
 """
 
 import functools
@@ -159,6 +206,22 @@ from rankfuse.kernels._common import SUPPORTED_DTYPES, check_layout
 BLOCK_H = 64
 BLOCK_N = 64
 MAX_R_PAD = 256
+
+# Split-K path (section 8). WAVES, EXPAND_BLOCK_N and EXPAND_WARPS: best geometric-mean
+# GPU time against B1 over T = 1..8192 in a graph-replay sweep on an H200 (4096 x 4096, r_max 64).
+SPLITK_BLOCK_H = 128  # h_in chunk per shrink step
+SPLITK_STAGES = 3  # loads in flight in the shrink loop
+SPLITK_WAVES = 1  # shrink programs per SM to aim for when choosing the slice count
+MAX_SPLIT_K = 16
+EXPAND_BLOCK_N = 128
+EXPAND_WAVES = 4  # expand programs per SM to aim for
+EXPAND_WARPS = 4
+# Above EXPAND_TILED_MIN_TOKENS the expand runs one output tile per program (no column loop),
+# with wider tiles and more warps: about 2x faster than the strip layout at 1024-8192 tokens.
+EXPAND_TILED_MIN_TOKENS = 128
+EXPAND_TILED_BLOCK_N = 256
+EXPAND_TILED_WARPS = 8
+MIN_SPLIT_K_TILED = 2  # at least this many shrink slices above EXPAND_TILED_MIN_TOKENS
 
 
 @triton.jit
@@ -380,6 +443,163 @@ def _rf2_fused_kernel(
                            BM=BM, BH=BH, BN=BN, R=256, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT)
 
 
+@triton.jit
+def _rf1_shrink_splitk_kernel(
+    x_ptr,
+    a_ptr,
+    ws_ptr,
+    T,
+    H_IN,
+    r_limit,
+    K_PER,
+    A_SLICE,
+    WS_SLICE,
+    BM: tl.constexpr,
+    BH: tl.constexpr,
+    R_PAD: tl.constexpr,
+):
+    # Section 8, phase 1: token block m, h_in slice k, output slice s.
+    pid_m = tl.program_id(0)
+    pid_k = tl.program_id(1)
+    pid_s = tl.program_id(2)
+    rows = pid_m * BM + tl.arange(0, BM)
+    row_ok = rows < T
+    k = tl.arange(0, R_PAD)
+    k_ok = k < r_limit
+    a_s = a_ptr + pid_s * A_SLICE
+    h_lo = pid_k * K_PER
+    v = tl.zeros((BM, R_PAD), dtype=tl.float32)
+    for h_start in range(0, K_PER, BH):
+        h = h_lo + h_start + tl.arange(0, BH)
+        h_ok = h < H_IN
+        x = tl.load(x_ptr + rows[:, None] * H_IN + h[None, :], mask=row_ok[:, None] & h_ok[None, :], other=0.0)
+        a = tl.load(a_s + k[:, None] * H_IN + h[None, :], mask=k_ok[:, None] & h_ok[None, :], other=0.0)
+        v += tl.dot(x, tl.trans(a), input_precision="ieee")
+    ws = ws_ptr + pid_s * WS_SLICE + pid_k * T * R_PAD + rows[:, None] * R_PAD + k[None, :]
+    tl.store(ws, v, mask=row_ok[:, None])
+
+
+@triton.jit
+def _rf1_expand_splitk_kernel(
+    ws_ptr,
+    ranks_ptr,
+    scale_tab_ptr,
+    b_ptr,
+    out_ptr,
+    slice_off_ptr,
+    slice_size_ptr,
+    T,
+    N_MAX,
+    OUT_STRIDE,
+    r_limit,
+    cols_per_prog,
+    SPLIT_K,
+    B_SLICE,
+    WS_SLICE,
+    BM: tl.constexpr,
+    BN: tl.constexpr,
+    R_PAD: tl.constexpr,
+    HAS_SCALE: tl.constexpr,
+    ADD_OUT: tl.constexpr,
+    ALIGNED: tl.constexpr,
+):
+    # Section 8, phase 2: sum the partials, mask, scale, expand one column range.
+    pid_m = tl.program_id(0)
+    pid_s = tl.program_id(2)
+    out_col0 = tl.load(slice_off_ptr + pid_s)
+    n_cols = tl.load(slice_size_ptr + pid_s)
+    if ALIGNED:
+        # Offsets and widths are multiples of 16 (checked on the host): tell the compiler, so
+        # the output stores can be vectorized. Without it they are issued one element at a time.
+        out_col0 = tl.multiple_of(out_col0, 16)
+        n_cols = tl.multiple_of(n_cols, 16)
+    col_base = tl.program_id(1) * cols_per_prog
+    if col_base < n_cols:
+        rows = pid_m * BM + tl.arange(0, BM)
+        row_ok = rows < T
+        ranks = tl.load(ranks_ptr + rows, mask=row_ok, other=0)
+        k = tl.arange(0, R_PAD)
+        k_ok = k < r_limit
+        ws_s = ws_ptr + pid_s * WS_SLICE
+        v = tl.zeros((BM, R_PAD), dtype=tl.float32)
+        for split in range(0, SPLIT_K):
+            v += tl.load(ws_s + split * T * R_PAD + rows[:, None] * R_PAD + k[None, :], mask=row_ok[:, None], other=0.0)
+        v = tl.where(k[None, :] < ranks[:, None], v, 0.0)
+        if HAS_SCALE:
+            scale = tl.load(scale_tab_ptr + ranks, mask=row_ok, other=0.0)
+            v = v * scale[:, None]
+        v_in = v.to(out_ptr.dtype.element_ty)
+        b_s = b_ptr + pid_s * B_SLICE
+        for col_start in range(0, cols_per_prog, BN):
+            cols = col_base + col_start + tl.arange(0, BN)
+            col_ok = cols < n_cols
+            b = tl.load(b_s + k[:, None] * N_MAX + cols[None, :], mask=k_ok[:, None] & col_ok[None, :], other=0.0)
+            acc = tl.dot(v_in, b, input_precision="ieee")
+            ptrs = out_ptr + rows[:, None] * OUT_STRIDE + out_col0 + cols[None, :]
+            mask = row_ok[:, None] & col_ok[None, :]
+            if ADD_OUT:
+                acc += tl.load(ptrs, mask=mask, other=0.0).to(tl.float32)
+            tl.store(ptrs, acc, mask=mask)
+
+
+@triton.jit
+def _rf1_expand_tile_kernel(
+    ws_ptr,
+    ranks_ptr,
+    scale_tab_ptr,
+    b_ptr,
+    out_ptr,
+    slice_off_ptr,
+    slice_size_ptr,
+    T,
+    N_MAX,
+    OUT_STRIDE,
+    r_limit,
+    SPLIT_K,
+    B_SLICE,
+    WS_SLICE,
+    BM: tl.constexpr,
+    BN: tl.constexpr,
+    R_PAD: tl.constexpr,
+    HAS_SCALE: tl.constexpr,
+    ADD_OUT: tl.constexpr,
+    ALIGNED: tl.constexpr,
+):
+    # Section 8, phase 2 above EXPAND_TILED_MIN_TOKENS: one BM x BN output tile per program and
+    # no column loop (a loop that runs once still cost ~30% of the expand at 8192 tokens).
+    pid_s = tl.program_id(2)
+    out_col0 = tl.load(slice_off_ptr + pid_s)
+    n_cols = tl.load(slice_size_ptr + pid_s)
+    if ALIGNED:
+        out_col0 = tl.multiple_of(out_col0, 16)
+        n_cols = tl.multiple_of(n_cols, 16)
+    col_base = tl.program_id(1) * BN
+    if col_base < n_cols:
+        rows = tl.program_id(0) * BM + tl.arange(0, BM)
+        row_ok = rows < T
+        ranks = tl.load(ranks_ptr + rows, mask=row_ok, other=0)
+        k = tl.arange(0, R_PAD)
+        k_ok = k < r_limit
+        ws_s = ws_ptr + pid_s * WS_SLICE
+        v = tl.zeros((BM, R_PAD), dtype=tl.float32)
+        for split in range(0, SPLIT_K):
+            v += tl.load(ws_s + split * T * R_PAD + rows[:, None] * R_PAD + k[None, :], mask=row_ok[:, None], other=0.0)
+        v = tl.where(k[None, :] < ranks[:, None], v, 0.0)
+        if HAS_SCALE:
+            scale = tl.load(scale_tab_ptr + ranks, mask=row_ok, other=0.0)
+            v = v * scale[:, None]
+        cols = col_base + tl.arange(0, BN)
+        col_ok = cols < n_cols
+        b = tl.load(b_ptr + pid_s * B_SLICE + k[:, None] * N_MAX + cols[None, :],
+                    mask=k_ok[:, None] & col_ok[None, :], other=0.0)
+        acc = tl.dot(v.to(out_ptr.dtype.element_ty), b, input_precision="ieee")
+        ptrs = out_ptr + rows[:, None] * OUT_STRIDE + out_col0 + cols[None, :]
+        mask = row_ok[:, None] & col_ok[None, :]
+        if ADD_OUT:
+            acc += tl.load(ptrs, mask=mask, other=0.0).to(tl.float32)
+        tl.store(ptrs, acc, mask=mask)
+
+
 @functools.lru_cache(maxsize=None)
 def _num_sms(device_index: int) -> int:
     return torch.cuda.get_device_properties(device_index).multi_processor_count
@@ -429,6 +649,76 @@ def _block_m(num_tokens: int, r_pad: int) -> int:
     return 32 if r_pad <= 128 else 16
 
 
+@functools.lru_cache(maxsize=None)
+def _max_shared_mem(device_index: int) -> int:
+    return triton.runtime.driver.active.utils.get_device_properties(device_index)["max_shared_mem"]
+
+
+def _splitk_shrink_tiles(block_m: int, r_pad: int, elem_size: int, device_index: int) -> tuple[int, int]:
+    """(BH, num_stages) for the split-K shrink: SPLITK_BLOCK_H and SPLITK_STAGES, reduced
+    while the x and A_t tiles of all pipeline stages would exceed ~70% of shared memory."""
+    budget = int(0.7 * _max_shared_mem(device_index))
+    bh, stages = SPLITK_BLOCK_H, SPLITK_STAGES
+    while stages > 2 and (block_m + r_pad) * bh * elem_size * stages > budget:
+        stages -= 1
+    while bh > 32 and (block_m + r_pad) * bh * elem_size * stages > budget:
+        bh //= 2
+    return bh, stages
+
+
+def _rf1_splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table, split_k):
+    """Section 8: split-K shrink into an fp32 workspace, then sum + mask + scale + expand."""
+    num_tokens, h_in = x.shape
+    n_slices, r_max, _ = A_t.shape
+    n_max = B.shape[2]
+    device_index = x.device.index or 0
+    num_sms = _num_sms(device_index)
+    block_m = _block_m(num_tokens, r_pad)
+    m_tiles = triton.cdiv(num_tokens, block_m)
+    bh, stages = _splitk_shrink_tiles(block_m, r_pad, x.element_size(), device_index)
+    tiled = num_tokens > EXPAND_TILED_MIN_TOKENS
+    if split_k is None:
+        split_k = max(MIN_SPLIT_K_TILED if tiled else 1, min(MAX_SPLIT_K, SPLITK_WAVES * num_sms // (m_tiles * n_slices)))
+    k_per = triton.cdiv(triton.cdiv(h_in, split_k), bh) * bh  # whole BH chunks per slice
+    split_k = triton.cdiv(h_in, k_per)  # no empty slices
+    ws = torch.empty((n_slices, split_k, num_tokens, r_pad), dtype=torch.float32, device=x.device)
+    ws_slice = split_k * num_tokens * r_pad
+    _rf1_shrink_splitk_kernel[(m_tiles, split_k, n_slices)](
+        x, A_t, ws, num_tokens, h_in, r_limit, k_per, r_max * h_in, ws_slice,
+        BM=block_m, BH=bh, R_PAD=r_pad, num_warps=4, num_stages=stages,
+    )
+
+    widest = max(sizes)
+    offsets, widths = _slice_tables(sizes, x.device)
+    # When there is no scale, out stands in for the unused table pointer.
+    scales = out if scale_table is None else scale_table
+    aligned = all(s % 16 == 0 for s in sizes)
+    if tiled:
+        # One tile per program; narrow the tile while B's [R_PAD, BN] tile would take more
+        # than ~35% of shared memory (fp32, r_max 128-256, smaller GPUs).
+        block_n = EXPAND_TILED_BLOCK_N
+        while block_n > 64 and r_pad * block_n * x.element_size() > 0.35 * _max_shared_mem(device_index):
+            block_n //= 2
+        _rf1_expand_tile_kernel[(m_tiles, triton.cdiv(widest, block_n), n_slices)](
+            ws, token_ranks, scales, B, out, offsets, widths,
+            num_tokens, n_max, out.stride(0), r_limit, split_k, r_max * n_max, ws_slice,
+            BM=block_m, BN=block_n, R_PAD=r_pad, HAS_SCALE=scale_table is not None, ADD_OUT=add,
+            ALIGNED=aligned, num_warps=EXPAND_TILED_WARPS, num_stages=2,
+        )
+        return out
+
+    n_tiles = triton.cdiv(widest, EXPAND_BLOCK_N)
+    n_split = min(n_tiles, max(1, EXPAND_WAVES * num_sms // (m_tiles * n_slices)))
+    cols_per_prog = triton.cdiv(n_tiles, n_split) * EXPAND_BLOCK_N
+    _rf1_expand_splitk_kernel[(m_tiles, triton.cdiv(widest, cols_per_prog), n_slices)](
+        ws, token_ranks, scales, B, out, offsets, widths,
+        num_tokens, n_max, out.stride(0), r_limit, cols_per_prog, split_k, r_max * n_max, ws_slice,
+        BM=block_m, BN=EXPAND_BLOCK_N, R_PAD=r_pad, HAS_SCALE=scale_table is not None, ADD_OUT=add,
+        ALIGNED=aligned, num_warps=EXPAND_WARPS, num_stages=2,
+    )
+    return out
+
+
 def rankfuse_lora(
     x: torch.Tensor,
     A_t: torch.Tensor,
@@ -442,14 +732,17 @@ def rankfuse_lora(
     scale_table: torch.Tensor | None = None,
     rank_sort: bool = False,
     order: torch.Tensor | None = None,
+    split_k: int | None = None,
 ) -> torch.Tensor:
     """Fused Matryoshka LoRA: out[:, slice s] (+)= scale * x @ A_t[s, :r].T @ B[s, :r, :size_s].
 
     x [T, h_in]; A_t [r_max, h_in] or [S, r_max, h_in]; B [r_max, h_out] or [S, r_max, n_max];
     token_ranks [T]; scale_table [r_max + 1] fp32 or None. Returns out [T, sum(slice_sizes)].
-    rank_sort=False is RF1 (pad to r_limit); rank_sort=True is RF2 (per-block rank buckets).
-    See the module docstring, section 5, for every option.
+    rank_sort=False is RF1 (pad to r_limit; split_k picks its path, section 8); rank_sort=True
+    is RF2 (per-block rank buckets). See the module docstring, section 5, for every option.
     """
+    if split_k is not None and split_k < 0:
+        raise ValueError(f"split_k must be None, 0 or positive, got {split_k}")
     if A_t.dim() == 2:
         A_t = A_t.unsqueeze(0)
     if B.dim() == 2:
@@ -501,6 +794,8 @@ def rankfuse_lora(
     r_pad = max(16, triton.next_power_of_2(max(r_limit, 1)))
     if r_pad > MAX_R_PAD:
         raise ValueError(f"ranks above {MAX_R_PAD} are not supported")
+    if not rank_sort and split_k != 0:
+        return _rf1_splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table, split_k)
 
     # Token blocks, column split, and grid.
     block_m = _block_m(num_tokens, r_pad)
@@ -542,7 +837,7 @@ def rankfuse_fused(
     token_ranks: torch.Tensor,
     r_limit: int | None = None,
 ) -> torch.Tensor:
-    """RF1: pad to the batch maximum rank, mask per token, one launch.
+    """RF1: pad to the batch maximum rank, mask per token; split-K path (section 8).
 
     r_limit: batch maximum rank. Leave it None in benchmarks so this pays the same single
     host sync as B1; a serving engine that knows request ranks should pass it in, which
@@ -551,6 +846,21 @@ def rankfuse_fused(
     check_layout(x, lora, token_ranks)
     return rankfuse_lora(
         x, lora.A_t, lora.B, token_ranks, r_limit=r_limit, scale_table=_scale_table(lora, x.device)
+    )
+
+
+@register("rf1_single", requires_cuda=True)
+def rankfuse_single(
+    x: torch.Tensor,
+    lora: MatryoshkaLoRA,
+    token_ranks: torch.Tensor,
+    r_limit: int | None = None,
+) -> torch.Tensor:
+    """RF1 in one launch (sections 3-4): the fusion ablation for rf1_fused's split-K path."""
+    check_layout(x, lora, token_ranks)
+    return rankfuse_lora(
+        x, lora.A_t, lora.B, token_ranks, r_limit=r_limit, scale_table=_scale_table(lora, x.device),
+        split_k=0,
     )
 
 
