@@ -1,5 +1,6 @@
 #!/bin/bash
-# One-time environment setup on PACE ICE. Run from the repo root on a login node:
+# One-time environment setup on PACE ICE. Clone the repo into ~/scratch/rankfuse/rank-fuse
+# (see scripts/ice/env.sh for the folder layout), then run from the repo root on a login node:
 #   bash scripts/ice/setup_env.sh
 #
 # Installs the newest stable vLLM, which brings its own PyTorch, Triton and CUDA libraries,
@@ -9,7 +10,7 @@
 set -euo pipefail
 
 source scripts/ice/env.sh
-mkdir -p "$HF_HOME" "$RF_ADAPTERS" "$TRITON_CACHE_DIR" "$PIP_CACHE_DIR" "$(dirname "$RF_ENV")"
+mkdir -p "$HF_HOME" "$RF_ADAPTERS" "$TRITON_CACHE_DIR" "$PIP_CACHE_DIR" "$CONDA_PKGS_DIRS" "$(dirname "$RF_ENV")"
 
 if [ ! -d "$RF_ENV" ]; then
     conda create -y -p "$RF_ENV" python=3.11
