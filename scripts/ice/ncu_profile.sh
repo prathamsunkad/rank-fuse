@@ -8,6 +8,7 @@
 set -euo pipefail
 source scripts/ice/env.sh
 module load cuda   # provides ncu
+ncu --version | tail -1
 
 IMPL=${1:?impl name}
 REQUESTS=${2:-32}
@@ -31,8 +32,14 @@ for _ in range(3):
 torch.cuda.synchronize()
 EOF
 
+# On ICE, ncu saves a zstd-compressed .ncu-repz that `ncu --import` cannot open; unpack it.
+if [ ! -f "${OUT}.ncu-rep" ] && [ -f "${OUT}.ncu-repz" ]; then
+    zstd -q -d -f "${OUT}.ncu-repz" -o "${OUT}.ncu-rep"
+fi
+
+# Metric names as in ncu 2026.3; lts__t_sectors are 32-byte L2 sectors.
 ncu --import "${OUT}.ncu-rep" --page raw --csv --metrics \
 gpu__time_duration.sum,dram__bytes_read.sum,dram__bytes_write.sum,\
-dram__throughput.avg.pct_of_peak_sustained_elapsed,lts__t_bytes.sum,lts__t_sector_hit_rate.pct \
+gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed,lts__t_sectors.sum,lts__t_sector_hit_rate.pct \
 > "${OUT}.csv"
 echo "wrote ${OUT}.csv"
