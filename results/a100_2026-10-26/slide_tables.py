@@ -121,5 +121,47 @@ docs.append(write("04_b2_vs_rank_groups", "Why B2 is slow: cost grows with the n
                   "in eager PyTorch, regrouping (with host syncs) every call.",
                   ["batch size", "rank groups", "workloads", "B2g vs B1 (median)", "B2g us", "B1 us", "B2 eager us"], rows))
 
+# 5. Every r_max 128 workload (only rf_vs_b1_r128 ran r_max 128).
+MIX_ORDER = ["all_min", "skew_low", "uniform", "skew_high", "all_max"]
+rows = []
+for k in sorted(r128, key=lambda k: (k[1] > 1, k[0] * k[1], MIX_ORDER.index(k[3]))):
+    n, t, _, mix = k
+    rows.append(["decode" if t == 1 else "prefill", f"{n} x {t}", n * t, mix, m128[k][0][0], m128[k][0][1]]
+                + time_cols(r128[k]) + [x(r128[k]["B1"], r128[k]["RF2"])])
+docs.append(write("05_rmax128_all", "Every r_max 128 workload",
+                  f"{gpu40}, 4096 x 4096, fp16, tiers 16/32/64/128, seed 0 (rf_vs_b1_r128). Prefill = "
+                  "16-token requests. all_min / all_max = one rank group (nothing for RF2 to skip).",
+                  ["phase", "requests x tokens", "tokens", "mix", "max rank", "rank groups"] + TIMES + ["RF2 vs B1"],
+                  rows))
+
+# 6. The r_max 128 rows worth showing, one point each.
+NOTABLE = [
+    ((16, 1, "uniform"), "small decode: RF1 wins, too few tokens for RF2 to skip"),
+    ((64, 1, "uniform"), "decode, max rank 128: RF2 = RF1"),
+    ((256, 1, "skew_low"), "largest decode: RF2 starts to win"),
+    ((256, 1, "uniform"), "largest decode: RF2 starts to win"),
+    ((256, 1, "all_max"), "control: nothing to skip, RF2 = RF1"),
+    ((64, 16, "all_min"), "rank width 16: RF1 2x faster than B1"),
+    ((64, 16, "all_max"), "rank width 128: RF1 slower than B1 (tuning gap)"),
+    ((64, 16, "skew_low"), "mixed: RF2 recovers it, beats B1"),
+    ((256, 16, "all_min"), "rank width 16: RF1 1.35x faster than B1"),
+    ((256, 16, "all_max"), "rank width 128: RF1 0.8x of B1; control for RF2"),
+    ((256, 16, "skew_low"), "best RF2 case: 1.57x over RF1, 1.26x over B1"),
+    ((256, 16, "uniform"), "RF2 1.37x over RF1"),
+    ((256, 16, "skew_high"), "mostly high ranks: RF2 gain shrinks, ties B1"),
+]
+rows = []
+for (n, t, mix), why in NOTABLE:
+    k = (n, t, 128, mix)
+    d = r128[k]
+    rows.append(["decode" if t == 1 else "prefill", f"{n} x {t}", n * t, mix, m128[k][0][0], m128[k][0][1],
+                 f"{d['B1']:.1f}", f"{d['RF1']:.1f}", f"{d['RF2']:.1f}",
+                 x(d["B1"], d["RF1"]), x(d["RF1"], d["RF2"]), x(d["B1"], d["RF2"]), why])
+docs.append(write("06_rmax128_notable", "r_max 128: the notable rows",
+                  f"{gpu40}, 4096 x 4096, fp16, tiers 16/32/64/128, seed 0. Picked from table 05. Prefill = "
+                  "16-token requests.",
+                  ["phase", "requests x tokens", "tokens", "mix", "max rank", "rank groups", "B1 us", "RF1 us",
+                   "RF2 us", "RF1 vs B1", "RF2 vs RF1", "RF2 vs B1", "what it shows"], rows))
+
 (OUT / "ALL_SLIDES.md").write_text("\n\n".join(docs) + "\n")
 print("\n\n".join(docs))
