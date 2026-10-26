@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import rankfuse  # noqa: E402  (registers implementations)
 from rankfuse import roofline  # noqa: E402
 from rankfuse.interface import REGISTRY  # noqa: E402
-from rankfuse.workloads import Workload, make_batch, make_lora  # noqa: E402
+from rankfuse.workloads import Workload, is_known_dist, make_batch, make_lora  # noqa: E402
 
 # Which roofline strategy each implementation should be compared against.
 ROOFLINE_STRATEGY = {
@@ -176,6 +176,9 @@ def main() -> None:
     impls = sorted(n for n in REGISTRY if n != "b0_reference") if cfg.get("impls", "all") == "all" else cfg["impls"]
     impls = [n for n in impls if not (REGISTRY[n].requires_cuda and a.device != "cuda")]
     workloads = expand_grid(cfg["grid"], cfg.get("shapes"))
+    unknown = sorted({w.dist for _, w in workloads if not is_known_dist(w.dist)})
+    if unknown:
+        sys.exit(f"unknown rank mixes in {a.config}: {unknown}")
 
     gname = gpu_name()
     gkey = roofline_gpu_key(gname)

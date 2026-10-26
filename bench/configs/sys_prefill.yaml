@@ -1,0 +1,31 @@
+# Systematic prefill sweep: every axis on a regular grid, every combination, 3 seeds.
+#   python bench/run_sweep.py bench/configs/sys_prefill.yaml
+# Axes:
+#   tokens     1-16 requests x 128-1024 tokens per request (128 .. 16384 tokens)
+#   r_max      64, 128 with the r_max/8, /4, /2, full tiers ("fractions" preset)
+#   rank mix   controlled low_frac_<pct>: pct% of requests at r_max/8, the rest at r_max, and at
+#              least one at r_max, so the batch maximum is always r_max (low_frac_0 = all_max).
+#              This is the variable RF2's rank skipping depends on. Plus the sampled mixes for
+#              comparison with earlier sweeps, and all_min / all_max as sanity rows (RF2 = RF1).
+#   (with 1-4 requests the fractions are coarse: the CSV mean_rank column has the real mix)
+#   seed       0, 1, 2: different adapter weights, inputs and request order; report the median.
+# Graph timing (GPU time; batch max rank and rank order prepared outside the graph). b2_grouped
+# cannot be captured and is timed eagerly; b2_grouped_graphed replays its own graph.
+# 1080 workloads x 5 impls, up to 16384 tokens: rough guess, about 3 h on an A100 (sbatch -t 04:00:00).
+name: sys_prefill
+impls: [b1_padded, b2_grouped, b2_grouped_graphed, rf1_fused, rf2_splitk]
+timing: graph
+warmup: 10
+reps: 50
+graph_replays: 20
+flush_l2: true
+grid:
+  num_requests: [1, 2, 4, 8, 16]
+  tokens_per_request: [128, 256, 512, 1024]
+  h_in: 4096
+  h_out: 4096
+  r_max: [64, 128]
+  tiers: fractions
+  dist: [all_min, all_max, low_frac_25, low_frac_50, low_frac_75, low_frac_90, uniform, skew_low, skew_high]
+  dtype: fp16
+  seed: [0, 1, 2]

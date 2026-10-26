@@ -19,6 +19,12 @@ DISTRIBUTIONS: dict[str, Callable[[int], list[float]]] = {
     "skew_high": lambda n: [(i + 1) / (n * (n + 1) / 2) for i in range(n)],
 }
 
+# Controlled mixes, not sampled: "low_frac_<pct>" puts round(pct% of requests) at the lowest tier
+# and the rest at the top tier, always keeping at least one request at the top tier so the batch
+# maximum rank is r_max (RF1 always pays full padding). Request order is shuffled by the seed.
+# "low_frac_0" equals all_max; a single request is always at the top tier.
+LOW_FRAC_PREFIX = "low_frac_"
+
 DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
 
 
@@ -28,6 +34,20 @@ def default_tiers(r_max: int) -> list[int]:
     while tiers[-1] * 2 < r_max:
         tiers.append(tiers[-1] * 2)
     return tiers + [r_max] if r_max > 1 else [1]
+
+
+# Named tier sets, so one config can sweep r_max without listing tiers per r_max.
+TIER_PRESETS: dict[str, Callable[[int], list[int]]] = {
+    "pow2": default_tiers,
+    "fractions": lambda r: sorted({max(1, r // 8), max(1, r // 4), max(1, r // 2), r}),  # r/8, r/4, r/2, full
+}
+
+
+def is_known_dist(dist: str) -> bool:
+    if dist in DISTRIBUTIONS:
+        return True
+    pct = dist.removeprefix(LOW_FRAC_PREFIX)
+    return dist.startswith(LOW_FRAC_PREFIX) and pct.isdigit() and int(pct) <= 100
 
 
 @dataclass(frozen=True)
@@ -40,7 +60,7 @@ class Workload:
     dist: str = "uniform"
     dtype: str = "fp16"
     seed: int = 0
-    tiers: tuple[int, ...] | None = None  # defaults to default_tiers(r_max)
+    tiers: tuple[int, ...] | str | None = None  # explicit ranks, a TIER_PRESETS name, or default_tiers(r_max)
 
     @property
     def num_tokens(self) -> int:
@@ -48,6 +68,8 @@ class Workload:
 
     @property
     def rank_tiers(self) -> list[int]:
+        if isinstance(self.tiers, str):
+            return TIER_PRESETS[self.tiers](self.r_max)
         return list(self.tiers) if self.tiers else default_tiers(self.r_max)
 
     def as_row(self) -> dict:
@@ -59,6 +81,12 @@ class Workload:
 
 def sample_request_ranks(w: Workload, gen: torch.Generator) -> list[int]:
     tiers = w.rank_tiers
+    if not is_known_dist(w.dist):
+        raise ValueError(f"unknown rank mix {w.dist!r}")
+    if w.dist.startswith(LOW_FRAC_PREFIX):
+        n_low = min(round(int(w.dist.removeprefix(LOW_FRAC_PREFIX)) / 100 * w.num_requests), w.num_requests - 1)
+        ranks = [tiers[0]] * n_low + [tiers[-1]] * (w.num_requests - n_low)
+        return [ranks[i] for i in torch.randperm(w.num_requests, generator=gen).tolist()]
     probs = torch.tensor(DISTRIBUTIONS[w.dist](len(tiers)), dtype=torch.float64)
     idx = torch.multinomial(probs, w.num_requests, replacement=True, generator=gen)
     return [tiers[i] for i in idx.tolist()]
