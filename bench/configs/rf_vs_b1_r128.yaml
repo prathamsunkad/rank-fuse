@@ -1,0 +1,23 @@
+# B1/B2 (PyTorch padded+mask, grouped by rank) vs RankFuse RF1 (split-K) and RF2 (sorted split-K).
+# Same grid as the Oct 24 rf_vs_b1 sweep on tonykernel, with the old Matryoshka tiers
+# (r_max/8, /4, /2, full) instead of the 7-tier default. One file per r_max because the tiers
+# depend on it: rf_vs_b1_r64.yaml is the other half. Run on one GPU type.
+#   python bench/run_sweep.py bench/configs/rf_vs_b1_r128.yaml
+# Graph timing: GPU time only, with each impl's per-step metadata (batch max rank, rank order)
+# built outside the graph. b2_grouped has a host sync, so it falls back to eager; the *_graphed
+# baselines replay their own graph and are timed eagerly. The `timing` column records which.
+name: rf_vs_b1_r128
+impls: [b1_padded, b1_padded_graphed, b2_grouped, b2_grouped_graphed, rf1_fused, rf2_splitk]
+timing: graph
+warmup: 20
+reps: 200
+flush_l2: true
+grid:
+  num_requests: [1, 4, 16, 64, 256]
+  tokens_per_request: [1, 16]
+  h_in: 4096
+  h_out: 4096
+  r_max: 128
+  tiers: [[16, 32, 64, 128]]   # one value: a list of tiers (a bare list would be swept)
+  dist: [all_min, all_max, uniform, skew_low, skew_high]
+  dtype: fp16
