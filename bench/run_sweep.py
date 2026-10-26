@@ -143,18 +143,23 @@ def time_graph(fn, args, kwargs, warmup: int, reps: int, replays: int, flush_l2:
     return [per_replay_us(graph) - flush_us for _ in range(reps)]
 
 
-def expand_grid(grid: dict, shapes: dict | None = None) -> list[tuple[str, Workload]]:
+def expand_grid(grid: dict, shapes: dict | None = None, batches: list | None = None) -> list[tuple[str, Workload]]:
     """Every combination of the grid values, as (shape name, workload).
 
     `shapes` maps a projection name to [h_in, h_out] (e.g. a model's q/kv/gate_up/down) and
     replaces the grid's h_in and h_out; without it, the shape name is "h_in x h_out".
+    `batches` lists [num_requests, tokens_per_request] pairs and replaces those two grid keys,
+    for batch shapes that are not a cross product (e.g. 4 x 512 and 16 x 128 but not 4 x 128).
     """
     named = [(name, {"h_in": h_in, "h_out": h_out}) for name, (h_in, h_out) in (shapes or {}).items()]
+    pairs = [{"num_requests": n, "tokens_per_request": t} for n, t in batches] if batches else [{}]
+    if batches and {"num_requests", "tokens_per_request"} & set(grid):
+        raise ValueError("give the batch shape either as `batches` or in the grid, not both")
     keys = list(grid)
     values = [v if isinstance(v, list) else [v] for v in grid.values()]
     out = []
-    for combo in itertools.product(*values):
-        params = dict(zip(keys, combo))
+    for pair, combo in itertools.product(pairs, itertools.product(*values)):
+        params = {**pair, **dict(zip(keys, combo))}
         for name, dims in named or [(None, {})]:
             w = Workload(**{**params, **dims})
             out.append((name or f"{w.h_in}x{w.h_out}", w))
@@ -175,7 +180,7 @@ def main() -> None:
         sys.exit("--timing graph needs CUDA")
     impls = sorted(n for n in REGISTRY if n != "b0_reference") if cfg.get("impls", "all") == "all" else cfg["impls"]
     impls = [n for n in impls if not (REGISTRY[n].requires_cuda and a.device != "cuda")]
-    workloads = expand_grid(cfg["grid"], cfg.get("shapes"))
+    workloads = expand_grid(cfg["grid"], cfg.get("shapes"), cfg.get("batches"))
     unknown = sorted({w.dist for _, w in workloads if not is_known_dist(w.dist)})
     if unknown:
         sys.exit(f"unknown rank mixes in {a.config}: {unknown}")
