@@ -5,20 +5,23 @@
 #
 # EDIT BEFORE FIRST USE:
 #   -A : your PI's charge account (`pace-quota` lists yours), e.g. gts-<pi-username>
-#   -q : inferno (charged) or embers (free, preemptible backfill)
-#   --gres : V100 for now. Report headline numbers on ONE GPU type; options include
-#            gpu:A100:1, gpu:H100:1, gpu:L40S:1 depending on what your account can access.
+#   -q : inferno (charged, default here) or embers (free, preemptible backfill)
+#   --gres : A100, the headline GPU on Phoenix. Report headline numbers on ONE GPU type.
+#            Avoid V100 for timing: Triton has no tensor-core path for sm_70, so RF1/RF2 run
+#            their dots as plain FMAs there (correctness tests are still fine).
 #
 # The env is picked from the GPU name (V100 -> rankfuse-v100, else rankfuse); ENV_PREFIX overrides.
-# Example on an A100:
-#   sbatch --gres=gpu:A100:1 scripts/phoenix/sweep.sbatch
+# Long sweeps need a longer limit, e.g. the systematic ones:
+#   sbatch -t 04:00:00 --export=ALL,CONFIG=bench/configs/sys_decode.yaml scripts/phoenix/sweep.sbatch
+# Free backfill instead of charged time:
+#   sbatch -q embers scripts/phoenix/sweep.sbatch
 #SBATCH -J rankfuse-sweep
 #SBATCH -A gts-smussmann3
-#SBATCH -q embers
+#SBATCH -q inferno
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --gres=gpu:V100:1
+#SBATCH --gres=gpu:A100:1
 #SBATCH --mem=32G
 #SBATCH -t 01:00:00
 #SBATCH -o results/slurm-%j.out
