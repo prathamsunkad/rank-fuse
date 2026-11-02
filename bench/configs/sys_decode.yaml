@@ -12,7 +12,7 @@
 # cannot be captured and is timed eagerly; b2_grouped_graphed replays its own graph.
 # 756 workloads x 5 impls: rough guess, about 2 h on an A100 (sbatch -t 03:00:00).
 name: sys_decode
-impls: [b1_padded, b2_grouped, b2_grouped_graphed, rf1_fused, rf2_splitk]
+impls: [b1_padded, b2_grouped, b2_grouped_graphed, rf1_fused, rf2_segment]
 timing: graph
 warmup: 10
 reps: 50

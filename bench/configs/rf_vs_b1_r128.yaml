@@ -1,4 +1,4 @@
-# B1/B2 (PyTorch padded+mask, grouped by rank) vs RankFuse RF1 (split-K) and RF2 (sorted split-K).
+# B1/B2 (PyTorch padded+mask, grouped by rank) vs RankFuse RF1 (split-K) and RF2 (segment; the 26 Oct results used the since-removed sorted kernel, rf2_splitk).
 # Same grid as the Oct 24 rf_vs_b1 sweep on tonykernel, with the old Matryoshka tiers
 # (r_max/8, /4, /2, full) instead of the 7-tier default. One file per r_max because the tiers
 # depend on it: rf_vs_b1_r64.yaml is the other half. Run on one GPU type.
@@ -7,7 +7,7 @@
 # built outside the graph. b2_grouped has a host sync, so it falls back to eager; the *_graphed
 # baselines replay their own graph and are timed eagerly. The `timing` column records which.
 name: rf_vs_b1_r128
-impls: [b1_padded, b1_padded_graphed, b2_grouped, b2_grouped_graphed, rf1_fused, rf2_splitk]
+impls: [b1_padded, b1_padded_graphed, b2_grouped, b2_grouped_graphed, rf1_fused, rf2_segment]
 timing: graph
 warmup: 20
 reps: 200

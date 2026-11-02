@@ -1,11 +1,85 @@
 # rank-fuse
 Triton-based kernel for efficient heterogeneous-rank MatryoshkaLoRA serving.
 
-Design, claims, baselines and milestones: **[docs/PLAN.md](docs/PLAN.md)**; the Matryoshka-LoRA
-serving plan and its status: **[docs/PLAN_MATLORA.md](docs/PLAN_MATLORA.md)**; how the kernels work,
-with measured results: **[docs/ALGORITHMS.md](docs/ALGORITHMS.md)**.
-Every measured result so far (tables as Markdown and CSV, raw data, rebuild script):
-**[results/h200_2026-10-25/](results/h200_2026-10-25/README.md)**.
+The Matryoshka-LoRA serving plan and its status: **[docs/PLAN_MATLORA.md](docs/PLAN_MATLORA.md)**;
+how the kernels work, with measured results: **[docs/ALGORITHMS.md](docs/ALGORITHMS.md)**.
+Measured results: **[H200, 25 Oct](results/h200_2026-10-25/README.md)** (tables as Markdown and CSV,
+raw data, rebuild script) and **[A100, 26 Oct](results/a100_2026-10-26/ALL_ROWS.md)**.
+
+## Project framing
+
+RankFuse makes two separate claims, and each has its own comparison:
+
+1. **Use the nesting instead of registering every rank as an adapter.** vLLM treats each rank of a
+   Matryoshka adapter as a separate adapter, with its own copy and LoRA slot (seven per adapter). One
+   shared copy removes that. No mixed-rank serving implementation exists to compare against, since
+   the paper's implementation only slices the matrix to the requested rank, so vLLM's approach is the
+   naive baseline. Most of this win is already in the PyTorch baseline (B1), not in a custom kernel.
+2. **Serve low-rank requests with less work.** RF2 reads fewer rank rows for blocks of low-rank
+   tokens. This is the harder claim: it only pays off on some workloads.
+
+### Implementations
+
+| Implementation | What it is |
+|---|---|
+| **B3** | vLLM's kernels, with each rank as a separate padded adapter |
+| **B1** | PyTorch with one shared copy, padded to the largest rank and masked; our construction, and the simplest mixed-rank design |
+| **B2** | PyTorch grouped by rank: the paper's slicing extended to mixed batches |
+| **RF1** (`rf1_fused`) | One shared copy in Triton, with every token block at the batch's rank width |
+| **RF2** (`rf2_segment`) | RF1 plus rank skipping: each token block runs at the smallest rank bucket covering its own maximum rank |
+
+Split-K splits the long `h_in` sum across concurrent programs. It is a general Triton optimization
+in every RF1 and RF2 variant, and it does not skip ranks.
+
+RF1 is not a clean measure of fusion: one-kernel fusion alone lost to B1 at decode, so `rf1_fused`
+also has split-K and other Triton optimizations. `rf1_single` is the one-kernel version. RF1 and RF2
+use general optimizations; beyond one shared copy and reading a prefix of its rows, we have not found
+another kernel advantage specific to the Matryoshka structure.
+
+### Comparisons
+
+| Comparison | What it shows |
+|---|---|
+| **B3 vs B1** | What using the Matryoshka structure gains over vLLM's approach |
+| **RF2 vs RF1** | What rank skipping gains: the main low-rank result |
+| **RF1 vs B1** | Whether RF2 is measured against a competitive kernel, not whether rank skipping helps; RF1 can lose here (0.80× of B1's speed on the A100 at r_max 128) |
+| **RF2 vs B1** | Whether the result beats the simple approach; report it next to RF2 vs RF1 |
+
+Quote the vLLM result with its limits: B3 is vLLM's kernels run on their own, not a vLLM server, and
+RF1's gain over them on one layer (1.9–2.8×) falls to 1.1–1.3× on a whole model.
+
+### Assumptions and future work
+
+* **Rank-sorted batches:** we assume the scheduler can provide requests in rank order, and leave that
+  overhead, and any vLLM changes it needs, to future work. It has not been checked against vLLM.
+  `rf2_segment` does not sort; it uses whatever order it receives, so report random and sorted order
+  side by side. Output is correct in either order, but random order skips less.
+* **Multi-adapter serving:** B1 is easiest to explain here, and the slot savings (one per adapter
+  instead of seven) do not depend on kernel speed. Still to write: a detailed comparison of memory
+  use and locality against vLLM. Whether locality gives RF2 a larger lead is an untested hypothesis.
+
+### Sweep plan
+
+Report every case, including those where RF2 loses, against the ideal bound.
+
+| Case | Workload | Config |
+|---|---|---|
+| **Best** | Large batches of mostly low ranks, with one request at r_max forcing RF1 to full width | `rf2_ideal.yaml` |
+| **Average** | Sampled rank mixes and simulated serving steps; these mixes are assumptions, not a real trace | `rf2_realistic.yaml`, `rf2_realistic_decode.yaml`, `rf2_shapes.yaml` |
+| **Worst** | All tokens at one rank (RF1 is already narrow), and small decode batches where launch cost dominates | `all_min` and `all_max` in `rf2_ideal.yaml`, `parity.yaml`; `num_requests` in `rf2_realistic_decode.yaml` |
+
+Change one variable at a time to isolate its effect:
+
+| Variable | Config key |
+|---|---|
+| Rank mix | `dist` |
+| Maximum rank | `r_max` (64, 128, 256; the paper's setting goes up to 256) |
+| Batch size | `num_requests` |
+| Prefill vs decode | `tokens_per_request`, `lengths` |
+| Total tokens | `batches` (`[num_requests, tokens_per_request]`) |
+| Request order | `request_order` |
+
+Run `parity.yaml` and `parity_add.yaml` before any other RF2 sweep.
 
 ## Layout
 
@@ -16,7 +90,7 @@ rankfuse/
   baselines/          B1 padded+mask (+ graphed), B2 grouped (+ graphed), B3 vLLM's kernels
                       (vllm_ops.py); B4 stub with a plan
   kernels/            RF1 (rankfuse_fused.py: split-K rf1_fused, rf1_single) and RF2
-                      (rf2_fused; rankfuse_rf2_splitk/segment/bucketed.py) Triton kernels
+                      (rf2_fused; rankfuse_rf2_segment/bucketed.py) Triton kernels
   workloads.py        seeded shapes and rank distributions
   roofline.py         analytic bytes/FLOPs/lower-bound per strategy
 tests/                correctness vs B0 for every registered impl; kernel serving features; roofline
@@ -25,6 +99,7 @@ bench/model_harness.py, model_forward.py   whole Qwen2.5-0.5B with each LoRA bac
 bench/vllm_step_time.py                    LoRA share of a stock vLLM step
 bench/ncu_driver.py   one profiled call for Nsight Compute
 analysis/plot.py      latency vs tokens, measured vs roofline
+analysis/rf2_eval.py  RF2 sweep tables, including sorted vs random order
 scripts/ice/          PACE ICE: env, first-run check, sweep, ncu profiling, vLLM adapter check
 scripts/make_adapters.py                   random Matryoshka adapters in PEFT format
 scripts/phoenix/      older PACE Phoenix scripts
@@ -69,6 +144,15 @@ python bench/vllm_step_time.py lora64 graphs results/raw/vllm_step.jsonl   # one
 `--timing eager` (the default without the flag) includes the Python launch overhead of each call,
 about 70-110 us on ICE nodes, which hides kernel differences at decode sizes; `--timing graph`
 captures each call in a CUDA graph and reports GPU time only.
+
+## Repository conventions
+
+* **Weight layout:** `A_t [r_max, h_in]` (A transposed) and `B [r_max, h_out]`, so a rank-r prefix is
+  a contiguous block of rows in both.
+* **Tokens, not requests:** decode and prefill use the same flattened format, and `Batch.seg_starts`
+  keeps request boundaries.
+* **Per-rank scale:** `MatryoshkaLoRA.scale_per_rank` (for example α/r).
+* **Correctness first:** nothing gets benchmarked until it passes `tests/test_correctness.py` against B0.
 
 ## Adding an implementation
 

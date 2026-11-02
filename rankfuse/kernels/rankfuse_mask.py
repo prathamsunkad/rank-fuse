@@ -9,7 +9,7 @@ Two Triton kernels (same split as Punica's SGMV shrink/expand), launched over th
 
 Why two kernels and not one fused kernel: every output tile of y needs the full v row, which
 needs a reduction over all of h_in. A single kernel would recompute v once per h_out tile.
-Try fusing later as an experiment (see docs/PLAN.md).
+The fused versions are in rankfuse_fused.py.
 
 Layouts (rankfuse/interface.py):
     x      [T, h_in]        row-major

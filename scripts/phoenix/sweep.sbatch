@@ -45,8 +45,14 @@ CONFIG=${CONFIG:-bench/configs/decode.yaml}
 nvidia-smi
 # Fail fast if this torch build has no kernels for the GPU (e.g. CUDA 13 torch on a V100).
 python -c "import torch; torch.ones(1, device='cuda').sum().item(); print('cuda ok', torch.__version__, torch.cuda.get_device_name())"
-python -m pytest -q -rs
+# SKIP_TESTS=1 for a sweep resubmitted after the tests already passed on this commit.
+[ -n "${SKIP_TESTS:-}" ] || python -m pytest -q -rs
 # CONFIG may list several configs separated by spaces; each writes its own CSV.
+# RESUME_DIR=<dir>: fixed CSV names there and --resume, for queues that can preempt (embers).
 for c in $CONFIG; do
-    python bench/run_sweep.py "$c"
+    if [ -n "${RESUME_DIR:-}" ]; then
+        python bench/run_sweep.py "$c" --resume --out "$RESUME_DIR/$(basename "$c" .yaml).csv"
+    else
+        python bench/run_sweep.py "$c"
+    fi
 done

@@ -1,0 +1,21 @@
+# Best case for rank skipping: low_frac_<pct> puts pct% of requests at rank 1 (computed at the
+# 16-row bucket) and the rest at r_max, always with one at r_max, so RF1 pays full width. Random
+# request order against physically rank-sorted batches. Add mode, as in a model.
+name: rf2_ideal
+impls: [rf1_fused, rf2_segment, rf2_segment_fw, rf2_bucketed, rf2_bucketed_seq, rf2_bucketed_tuned, rf1_fused]
+timing: graph
+mode: add
+warmup: 10
+reps: 30
+graph_replays: 20
+flush_l2: true
+batches: [[256, 1], [1024, 1], [2048, 1], [8192, 1], [16, 128], [32, 256], [16, 512]]
+grid:
+  h_in: 4096
+  h_out: 4096
+  r_max: [64, 128, 256]
+  tiers: pow2
+  dist: [all_min, all_max, low_frac_25, low_frac_50, low_frac_75, low_frac_90]  # one-rank rows give the ideal bound
+  request_order: [random, sorted]
+  dtype: fp16
+  seed: [0, 1, 2]

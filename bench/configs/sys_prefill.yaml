@@ -13,7 +13,7 @@
 # cannot be captured and is timed eagerly; b2_grouped_graphed replays its own graph.
 # 1080 workloads x 5 impls, up to 16384 tokens: rough guess, about 3 h on an A100 (sbatch -t 04:00:00).
 name: sys_prefill
-impls: [b1_padded, b2_grouped, b2_grouped_graphed, rf1_fused, rf2_splitk]
+impls: [b1_padded, b2_grouped, b2_grouped_graphed, rf1_fused, rf2_segment]
 timing: graph
 warmup: 10
 reps: 50

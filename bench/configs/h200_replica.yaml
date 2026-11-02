@@ -10,7 +10,7 @@
 # vLLM). Ranks are sampled, so batch maximum ranks will not match his rows one for one; the
 # controlled-mix sweeps are sys_decode.yaml / sys_prefill.yaml.
 name: h200_replica
-impls: [b1_padded, b2_grouped, b2_grouped_graphed, rf1_single, rf1_fused, rf2_fused, rf2_splitk]
+impls: [b1_padded, b2_grouped, b2_grouped_graphed, rf1_single, rf1_fused, rf2_fused, rf2_segment]
 timing: graph
 warmup: 10
 reps: 7

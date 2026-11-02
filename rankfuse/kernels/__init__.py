@@ -25,14 +25,12 @@ tests/test_correctness.py and bench/run_sweep.py pick it up automatically.
                        is computed and written by one program, so programs do not race to
                        update the same result and need no atomic additions.
                        Compare RF1 vs RF2 to measure the benefit of skipping high-rank bands.
-* rankfuse_rf2_splitk.py   - rf2_splitk: rf1_fused's split-K design over a stable rank sort, each
-                             token block at its own rank bucket. Ablation: the sort costs about
-                             what the skipping saves.
-* rankfuse_rf2_segment.py  - rf2_segment: the same per-block buckets over blocks of consecutive
-                             tokens (a block table, no sort); contiguous loads and stores.
-* rankfuse_rf2_bucketed.py - rf2_bucketed: one kernel pair compiled per rank bucket, launched on
-                             concurrent streams from a per-step CPU plan; `use_rf2` picks it over
-                             rf1_fused only where it measured faster (large prompts, mixed ranks).
+The split-K variants below all launch rf1_fused's kernels (rankfuse_fused.splitk_pass), so they
+differ only in how tokens are read and how wide each group runs:
+* rankfuse_rf2_segment.py  - rf2_segment: per-block rank buckets over the batch's own order, sorted
+                             or not, and rf2_segment_fw, its full-width control. The main RF2.
+* rankfuse_rf2_bucketed.py - rf2_bucketed: one launch per rank bucket on concurrent streams, from a
+                             per-step CPU plan, and rf2_bucketed_tuned with per-bucket block sizes.
 
 Next TODOs: accept a scheduler-prepared rank order so RF2 can reuse it across layers, autotune
 tile sizes, and profile actual DRAM/L2 traffic. Rank sorting aims to improve prefix reuse; it
@@ -48,5 +46,5 @@ from importlib.util import find_spec
 
 if find_spec("triton") is not None:
     from rankfuse.kernels import rankfuse_fused, rankfuse_mask, rankfuse_ragged  # noqa: F401
-    from rankfuse.kernels import rankfuse_rf2_bucketed, rankfuse_rf2_segment, rankfuse_rf2_splitk  # noqa: F401
+    from rankfuse.kernels import rankfuse_rf2_bucketed, rankfuse_rf2_segment  # noqa: F401
 
