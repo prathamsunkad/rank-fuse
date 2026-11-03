@@ -194,7 +194,9 @@ width (R_PAD for RF1; a fixed bucket per launch for rf2_bucketed; with RANK_SKIP
 bucket at run time, branching to a part compiled for that width).
 rf2_segment_fw passes force_rank = r_limit, so each block takes the batch's bucket through the
 same binary: rf2_segment vs rf2_segment_fw is the effect of skipping alone, and rf2_segment_fw
-vs rf1_fused is the cost of the rank read and branch.
+vs rf1_fused is the cost of the rank read and branch. rf2_probe_read and rf2_probe_branch split
+that cost into steps at one compiled width: rf1_fused -> read -> one branch -> rf2_segment_fw, whose
+last step is the extra compiled widths.
 
 ws is [n_slices, S, T, R_PAD] fp32, allocated per call (inside a CUDA-graph capture it comes
 from the graph's memory pool). At T = 32 with S = 16 it is 128 KiB and stays in L2. Rank-0
@@ -493,6 +495,7 @@ def _splitk_shrink_kernel(
     R_PAD: tl.constexpr,
     INDEXED: tl.constexpr,
     RANK_SKIP: tl.constexpr,
+    RANK_PROBE: tl.constexpr,
 ):
     # Section 8, phase 1: token block m, h_in slice k, output slice s.
     pid_k = tl.program_id(1)
@@ -524,6 +527,14 @@ def _splitk_shrink_kernel(
             else:
                 if R_PAD >= 256:
                     _splitk_shrink_part(x_ptr, a_s, ws_k, tok, pos, row_ok, H_IN, r_limit, h_lo, K_PER, BM=BM, BH=BH, R=256, R_PAD=R_PAD)
+    elif RANK_PROBE == 1:
+        ranks = tl.load(ranks_ptr + tok, mask=row_ok, other=0)
+        kept = row_ok & (tl.max(ranks, axis=0) >= 0)  # always true; uses the read without a branch
+        _splitk_shrink_part(x_ptr, a_s, ws_k, tok, pos, kept, H_IN, r_limit, h_lo, K_PER, BM=BM, BH=BH, R=R, R_PAD=R_PAD)
+    elif RANK_PROBE == 2:
+        ranks = tl.load(ranks_ptr + tok, mask=row_ok, other=0)
+        if tl.maximum(tl.max(ranks, axis=0).to(tl.int32), force_rank) > 0:
+            _splitk_shrink_part(x_ptr, a_s, ws_k, tok, pos, row_ok, H_IN, r_limit, h_lo, K_PER, BM=BM, BH=BH, R=R, R_PAD=R_PAD)
     else:
         _splitk_shrink_part(x_ptr, a_s, ws_k, tok, pos, row_ok, H_IN, r_limit, h_lo, K_PER, BM=BM, BH=BH, R=R, R_PAD=R_PAD)
 
@@ -612,6 +623,7 @@ def _splitk_expand_kernel(
     LOOP: tl.constexpr,
     INDEXED: tl.constexpr,
     RANK_SKIP: tl.constexpr,
+    RANK_PROBE: tl.constexpr,
 ):
     # Section 8, phase 2. With LOOP each program walks a column strip; without it (above
     # EXPAND_TILED_MIN_TOKENS) each program owns one BM x BN output tile.
@@ -661,6 +673,17 @@ def _splitk_expand_kernel(
                 if R_PAD >= 256:
                     _splitk_expand_part(ws_s, scale_tab_ptr, b_s, out_ptr, tok, pos, row_ok, ranks, T, N_MAX, OUT_STRIDE, r_limit, SPLIT_K, out_col0, n_cols,
                                         col_base, cols_per_prog, BM=BM, BN=BN, R=256, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, LOOP=LOOP)
+        elif RANK_PROBE == 1:
+            kept = row_ok & (tl.max(ranks, axis=0) >= 0)  # always true; uses the maximum without a branch
+            _splitk_expand_part(ws_s, scale_tab_ptr, b_s, out_ptr, tok, pos, kept, ranks, T, N_MAX, OUT_STRIDE, r_limit, SPLIT_K, out_col0, n_cols,
+                                col_base, cols_per_prog, BM=BM, BN=BN, R=R, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, LOOP=LOOP)
+        elif RANK_PROBE == 2:
+            if tl.maximum(tl.max(ranks, axis=0).to(tl.int32), force_rank) == 0:
+                if not ADD_OUT:
+                    _splitk_zero_part(out_ptr, tok, row_ok, n_cols, out_col0, OUT_STRIDE, col_base, cols_per_prog, BM=BM, BN=BN, LOOP=LOOP)
+            else:
+                _splitk_expand_part(ws_s, scale_tab_ptr, b_s, out_ptr, tok, pos, row_ok, ranks, T, N_MAX, OUT_STRIDE, r_limit, SPLIT_K, out_col0, n_cols,
+                                    col_base, cols_per_prog, BM=BM, BN=BN, R=R, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, LOOP=LOOP)
         else:
             _splitk_expand_part(ws_s, scale_tab_ptr, b_s, out_ptr, tok, pos, row_ok, ranks, T, N_MAX, OUT_STRIDE, r_limit, SPLIT_K, out_col0, n_cols,
                                 col_base, cols_per_prog, BM=BM, BN=BN, R=R, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, LOOP=LOOP)
@@ -742,12 +765,14 @@ def _split_count(h_in: int, tiled: bool, grid_tiles: int, n_slices: int, num_sms
 
 
 def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, block_m, bh, stages,
-                *, index=None, count=None, ws_row0=0, grid_tiles=None, rank=None, rank_skip=False, force_rank=0, block_n=None):
+                *, index=None, count=None, ws_row0=0, grid_tiles=None, rank=None, rank_skip=False, rank_probe=0, force_rank=0, block_n=None):
     """Launch the two split-K kernels for one group of tokens; every RF1 and RF2 variant comes here.
 
     Tokens: the batch in order (index None), or index[:count] through a lookup, with partials in
     workspace rows ws_row0 + position. Rank width: R_PAD; or `rank` rows for this group; or, with
-    rank_skip, each block's own bucket at run time, never below force_rank. grid_tiles is the token
+    rank_skip, each block's own bucket at run time, never below force_rank. rank_probe keeps one
+    width and adds part of the rank-skipping path, to measure it: 1 the rank read, 2 also one
+    branch. grid_tiles is the token
     block count across all groups launched together; block_n overrides the tiled expand's tile.
     """
     num_tokens, h_in = x.shape
@@ -762,7 +787,7 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
     index_ptr = token_ranks if index is None else index
     _splitk_shrink_kernel[(m_tiles, split_k, n_slices)](
         x, A_t, token_ranks, index_ptr, ws, count, ws_row0, num_tokens, h_in, r_limit, force_rank, k_per, r_max * h_in, ws_slice,
-        BM=block_m, BH=bh, R=r, R_PAD=r_pad, INDEXED=index is not None, RANK_SKIP=rank_skip, num_warps=4, num_stages=stages,
+        BM=block_m, BH=bh, R=r, R_PAD=r_pad, INDEXED=index is not None, RANK_SKIP=rank_skip, RANK_PROBE=rank_probe, num_warps=4, num_stages=stages,
     )
 
     widest = max(sizes)
@@ -789,12 +814,12 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
         ws, token_ranks, index_ptr, scales, B, out, offsets, widths, count, ws_row0,
         num_tokens, n_max, out.stride(0), r_limit, force_rank, cols_per_prog, split_k, r_max * n_max, ws_slice,
         BM=block_m, BN=block_n, R=r, R_PAD=r_pad, HAS_SCALE=scale_table is not None, ADD_OUT=add,
-        ALIGNED=aligned, LOOP=not tiled, INDEXED=index is not None, RANK_SKIP=rank_skip, num_warps=warps, num_stages=2,
+        ALIGNED=aligned, LOOP=not tiled, INDEXED=index is not None, RANK_SKIP=rank_skip, RANK_PROBE=rank_probe, num_warps=warps, num_stages=2,
     )
     return out
 
 
-def _splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table, split_k, rank_skip, force_rank):
+def _splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table, split_k, rank_skip, force_rank, rank_probe):
     """Section 8: split-K shrink into an fp32 workspace, then sum + mask + scale + expand."""
     num_tokens, h_in = x.shape
     n_slices = A_t.shape[0]
@@ -806,7 +831,7 @@ def _splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table
     split_k, k_per = _split_count(h_in, tiled, m_tiles, n_slices, _num_sms(device_index), bh, split_k)
     ws = torch.empty((n_slices, split_k, num_tokens, r_pad), dtype=torch.float32, device=x.device)
     return splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, block_m, bh, stages,
-                       rank_skip=rank_skip, force_rank=force_rank)
+                       rank_skip=rank_skip, rank_probe=rank_probe, force_rank=force_rank)
 
 
 def rankfuse_lora(
@@ -825,6 +850,7 @@ def rankfuse_lora(
     split_k: int | None = None,
     rank_skip: bool = False,
     full_width: bool = False,
+    rank_probe: int = 0,
 ) -> torch.Tensor:
     """Fused Matryoshka LoRA: out[:, slice s] (+)= scale * x @ A_t[s, :r].T @ B[s, :r, :size_s].
 
@@ -834,12 +860,15 @@ def rankfuse_lora(
     is the one-kernel rf2_fused. rank_skip=True is RF2 on RF1's split-K path: each block runs at
     its own rank bucket, over the batch's order; a caller wanting rank order passes sorted inputs.
     full_width=True keeps that same kernel but makes every block take the batch's bucket, the
-    control that isolates skipping. See the module docstring, section 5, for every option.
+    control that isolates skipping. rank_probe=1 or 2 is RF1's full width plus the rank read, or
+    the read and one branch (diagnostics). See the module docstring, section 5, for every option.
     """
     if split_k is not None and split_k < 0:
         raise ValueError(f"split_k must be None, 0 or positive, got {split_k}")
     if rank_skip and (split_k == 0 or rank_sort):
         raise ValueError("rank_skip runs on the split-K path over the batch's order; it cannot take split_k=0 or rank_sort")
+    if rank_probe not in (0, 1, 2) or (rank_probe and (rank_skip or rank_sort or split_k == 0)):
+        raise ValueError("rank_probe is 1 or 2, on RF1's split-K path only")
     if full_width and not rank_skip:
         raise ValueError("full_width is the control for rank_skip; it needs rank_skip=True")
     if A_t.dim() == 2:
@@ -895,7 +924,7 @@ def rankfuse_lora(
         raise ValueError(f"ranks above {MAX_R_PAD} are not supported")
     if rank_skip or (not rank_sort and split_k != 0):
         return _splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table, split_k,
-                       rank_skip, r_limit if full_width else 0)
+                       rank_skip, r_limit if full_width or rank_probe == 2 else 0, rank_probe)
 
     # Token blocks, column split, and grid.
     block_m = _block_m(num_tokens, r_pad)

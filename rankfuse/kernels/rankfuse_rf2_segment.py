@@ -53,3 +53,33 @@ def rankfuse_rf2_segment_fw(
     check_layout(x, lora, token_ranks)
     return rf2_segment(x, lora.A_t, lora.B, token_ranks, r_limit, out=out, add=add,
                        scale_table=rf._scale_table(lora, x.device), full_width=True)
+
+
+# Steps between rf1_fused and rf2_segment_fw, to see which one costs time: the rank read alone, then
+# the read and one branch. Both compile a single width; rf2_segment_fw adds the other widths' arms.
+@register("rf2_probe_read", requires_cuda=True, prepare=prepare_r_limit)
+def rankfuse_rf2_probe_read(
+    x: torch.Tensor,
+    lora: MatryoshkaLoRA,
+    token_ranks: torch.Tensor,
+    r_limit: int | None = None,
+    out: torch.Tensor | None = None,
+    add: bool = False,
+) -> torch.Tensor:
+    check_layout(x, lora, token_ranks)
+    return rf.rankfuse_lora(x, lora.A_t, lora.B, token_ranks, out=out, add=add, r_limit=r_limit,
+                            scale_table=rf._scale_table(lora, x.device), rank_probe=1)
+
+
+@register("rf2_probe_branch", requires_cuda=True, prepare=prepare_r_limit)
+def rankfuse_rf2_probe_branch(
+    x: torch.Tensor,
+    lora: MatryoshkaLoRA,
+    token_ranks: torch.Tensor,
+    r_limit: int | None = None,
+    out: torch.Tensor | None = None,
+    add: bool = False,
+) -> torch.Tensor:
+    check_layout(x, lora, token_ranks)
+    return rf.rankfuse_lora(x, lora.A_t, lora.B, token_ranks, out=out, add=add, r_limit=r_limit,
+                            scale_table=rf._scale_table(lora, x.device), rank_probe=2)

@@ -15,6 +15,10 @@
 #   sbatch -t 04:00:00 --export=ALL,CONFIG=bench/configs/sys_decode.yaml scripts/phoenix/sweep.sbatch
 # Free backfill instead of charged time:
 #   sbatch -q embers scripts/phoenix/sweep.sbatch
+# Pin one GPU type. A100-80GB also matches the SXM4 node, so exclude it; REQUIRE_GPU fails the job
+# if it still lands on anything else (use this for every run that will be compared):
+#   sbatch --constraint=A100-80GB --exclude=atl1-1-01-002-28-0 \
+#       --export=ALL,REQUIRE_GPU="NVIDIA A100 80GB PCIe",CONFIG=... scripts/phoenix/sweep.sbatch
 #SBATCH -J rankfuse-sweep
 #SBATCH -A gts-smussmann3
 #SBATCH -q inferno
@@ -42,6 +46,11 @@ conda activate "$ENV_PREFIX"
 export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-$HOME/scratch/.triton}
 
 CONFIG=${CONFIG:-bench/configs/decode.yaml}
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+if [ -n "${REQUIRE_GPU:-}" ] && [ "$GPU_NAME" != "$REQUIRE_GPU" ]; then
+    echo "got GPU '$GPU_NAME', need '$REQUIRE_GPU'" >&2
+    exit 1
+fi
 nvidia-smi
 # Fail fast if this torch build has no kernels for the GPU (e.g. CUDA 13 torch on a V100).
 python -c "import torch; torch.ones(1, device='cuda').sum().item(); print('cuda ok', torch.__version__, torch.cuda.get_device_name())"

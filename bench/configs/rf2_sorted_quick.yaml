@@ -1,0 +1,20 @@
+# First read on physically rank-sorted batches: rf2_segment random vs sorted, against its full-width
+# control, rf1_fused (listed twice for noise) and rf2_bucketed. A small subset, not the full sweeps.
+name: rf2_sorted_quick
+impls: [rf1_fused, rf2_segment, rf2_segment_fw, rf2_bucketed, rf1_fused]
+timing: graph
+mode: add
+warmup: 10
+reps: 30
+graph_replays: 20
+flush_l2: true
+batches: [[128, 1], [512, 1], [2048, 1], [8192, 1], [16, 512]]
+grid:
+  h_in: 4096
+  h_out: 4096
+  r_max: [64, 128]
+  tiers: pow2
+  dist: [all_max, uniform, skew_low, low_frac_90]
+  request_order: [random, sorted]
+  dtype: fp16
+  seed: [0, 1, 2]

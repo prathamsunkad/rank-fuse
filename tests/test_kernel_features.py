@@ -29,8 +29,10 @@ KERNELS = pytest.mark.parametrize(
         dict(rank_sort=True),
         dict(rank_skip=True),
         dict(rank_skip=True, full_width=True),
+        dict(rank_probe=1),
+        dict(rank_probe=2),
     ],
-    ids=["rf1", "rf1_single", "rf2_fused", "rf2_segment", "rf2_segment_fw"],
+    ids=["rf1", "rf1_single", "rf2_fused", "rf2_segment", "rf2_segment_fw", "rf2_probe_read", "rf2_probe_branch"],
 )
 DTYPES = pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=["fp32", "fp16"])
 
@@ -192,6 +194,10 @@ def test_invalid_arguments():
         rankfuse_lora(x, A_t, B, ranks, rank_skip=True, rank_sort=True)  # sort the batch instead
     with pytest.raises(ValueError):
         rankfuse_lora(x, A_t, B, ranks, full_width=True)  # the control for rank_skip
+    with pytest.raises(ValueError):
+        rankfuse_lora(x, A_t, B, ranks, rank_probe=3)
+    with pytest.raises(ValueError):
+        rankfuse_lora(x, A_t, B, ranks, rank_probe=1, rank_skip=True)
 
 
 @pytest.mark.parametrize("split_k", [1, 2, 3, 7, 64], ids=lambda s: f"S{s}")
