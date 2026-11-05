@@ -64,7 +64,7 @@ Report every case, including those where RF2 loses, against the ideal bound.
 
 | Case | Workload | Config |
 |---|---|---|
-| **Best** | Large batches of mostly low ranks, with one request at r_max forcing RF1 to full width | `rf2_ideal.yaml` |
+| **Best** | Large batches of 25–99% low ranks with the rest at r_max, down to a single request at r_max (`low_frac_100`) forcing RF1 to full width | `rf2_ideal.yaml` |
 | **Average** | Sampled rank mixes and simulated serving steps; these mixes are assumptions, not a real trace | `rf2_realistic.yaml`, `rf2_realistic_decode.yaml`, `rf2_shapes.yaml` |
 | **Worst** | All tokens at one rank (RF1 is already narrow), and small decode batches where launch cost dominates | `all_min` and `all_max` in `rf2_ideal.yaml`, `parity.yaml`; `num_requests` in `rf2_realistic_decode.yaml` |
 

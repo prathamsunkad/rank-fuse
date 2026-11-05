@@ -16,7 +16,7 @@ def test_default_tiers_unchanged():
 
 
 @pytest.mark.parametrize("requests", [1, 2, 3, 16, 100])
-@pytest.mark.parametrize("pct", [0, 25, 50, 75, 90, 100])
+@pytest.mark.parametrize("pct", [0, 25, 50, 75, 90, 99, 100])
 def test_low_frac_counts(requests, pct):
     w = Workload(requests, 1, r_max=64, tiers="fractions", dist=f"low_frac_{pct}")
     ranks = sample_request_ranks(w, torch.Generator().manual_seed(0))
