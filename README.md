@@ -27,6 +27,7 @@ RankFuse makes two separate claims, and each has its own comparison:
 | **B2** | PyTorch grouped by rank: the paper's slicing extended to mixed batches |
 | **RF1** (`rf1_fused`) | One shared copy in Triton, with every token block at the batch's rank width |
 | **RF2** (`rf2_segment`) | RF1 plus rank skipping: each token block runs at the smallest rank bucket covering its own maximum rank |
+| **RF2, sorted index** (`rf2_index`) | The same per-block widths, reading tokens through a rank-sorted index list instead of needing them physically sorted |
 
 Split-K splits the long `h_in` sum across concurrent programs. It is a general Triton optimization
 in every RF1 and RF2 variant, and it does not skip ranks.
@@ -50,15 +51,19 @@ RF1's gain over them on one layer (1.9–2.8×) falls to 1.1–1.3× on a whole 
 
 ### Assumptions and future work
 
-* **Rank-sorted batches:** we assume the scheduler can provide requests in rank order, and leave that
-  overhead, and any vLLM changes it needs, to future work. It has not been checked against vLLM.
-  `rf2_segment` does not sort; it uses whatever order it receives, so report random and sorted order
-  side by side. Output is correct in either order, but random order skips less.
+* **Rank-sorted batches:** we test two scheduler assumptions and leave their overhead, and any vLLM
+  changes they need, to future work; neither has been checked against vLLM. Physically sorted
+  tokens use `rf2_segment`, which reads whatever order it receives; a sorted index list, the weaker
+  assumption and closer to vLLM's existing per-step sort, uses `rf2_index`. Output is correct in any
+  order, but unsorted input without a list skips less.
 * **Multi-adapter serving:** B1 is easiest to explain here, and the slot savings (one per adapter
   instead of seven) do not depend on kernel speed. Still to write: a detailed comparison of memory
   use and locality against vLLM. Whether locality gives RF2 a larger lead is an untested hypothesis.
 
 ### Sweep plan
+
+How the RF2 kernels differ, the two scheduler assumptions, and why each sweep exists:
+**[docs/RF2_TESTING.md](docs/RF2_TESTING.md)**.
 
 Report every case, including those where RF2 loses, against the ideal bound.
 

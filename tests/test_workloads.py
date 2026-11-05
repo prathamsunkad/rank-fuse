@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from rankfuse.workloads import Workload, is_known_dist, make_batch, sample_request_ranks
+from rankfuse.workloads import DISTRIBUTIONS, Workload, is_known_dist, make_batch, sample_request_ranks
 
 
 @pytest.mark.parametrize("r_max, expected", [(64, [8, 16, 32, 64]), (128, [16, 32, 64, 128]), (4, [1, 2, 4])])
@@ -23,6 +23,21 @@ def test_low_frac_counts(requests, pct):
     n_low = min(round(pct / 100 * requests), requests - 1)
     assert sorted(ranks) == [8] * n_low + [64] * (requests - n_low)
     assert max(ranks) == 64  # batch maximum rank is always r_max
+
+
+@pytest.mark.parametrize("dist", ["zipf_1", "zipf_2"])
+@pytest.mark.parametrize("n", [1, 4, 9])
+def test_zipf_weights(dist, n):
+    w = DISTRIBUTIONS[dist](n)
+    assert sum(w) == pytest.approx(1.0)
+    assert all(a > b for a, b in zip(w, w[1:]))  # every higher rank is rarer
+
+
+def test_zipf_r256_bucket_shares():
+    """The shares quoted for r_max 256's nine pow2 tiers: ranks 1-16 (the 16-row bucket) and r_max."""
+    for dist, low, top in [("zipf_1", 0.807, 0.039), ("zipf_2", 0.951, 0.008)]:
+        w = DISTRIBUTIONS[dist](len(Workload(1, 1, r_max=256).rank_tiers))
+        assert sum(w[:5]) == pytest.approx(low, abs=1e-3) and w[-1] == pytest.approx(top, abs=1e-3)
 
 
 def test_low_frac_seed_shuffles_order_only():

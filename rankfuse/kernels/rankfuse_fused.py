@@ -189,8 +189,8 @@ Single projections and vLLM's fused q/k/v and gate/up layouts are all aligned.
 
 Every RF1 and RF2 variant on this path launches these same kernels through splitk_pass, so
 slices, the hint, block sizes and tile rules cannot differ between them. Two settings separate
-the variants: INDEXED (rf2_bucketed reads each bucket's tokens through a table) and the rank
-width (R_PAD for RF1; a fixed bucket per launch for rf2_bucketed; with RANK_SKIP, each block's
+the variants: INDEXED (rf2_index reads tokens through a sorted index, rf2_bucketed each bucket's
+tokens through a table) and the rank width (R_PAD for RF1; a fixed bucket per launch for rf2_bucketed; with RANK_SKIP, each block's
 bucket at run time, branching to a part compiled for that width).
 rf2_segment_fw passes force_rank = r_limit, so each block takes the batch's bucket through the
 same binary: rf2_segment vs rf2_segment_fw is the effect of skipping alone, and rf2_segment_fw
@@ -819,8 +819,10 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
     return out
 
 
-def _splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table, split_k, rank_skip, force_rank, rank_probe):
-    """Section 8: split-K shrink into an fp32 workspace, then sum + mask + scale + expand."""
+def _splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table, split_k, rank_skip, force_rank, rank_probe,
+            index=None):
+    """Section 8: split-K shrink into an fp32 workspace, then sum + mask + scale + expand. index: read
+    the tokens through this order (rf2_index) instead of the batch order."""
     num_tokens, h_in = x.shape
     n_slices = A_t.shape[0]
     device_index = x.device.index or 0
@@ -831,7 +833,7 @@ def _splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table
     split_k, k_per = _split_count(h_in, tiled, m_tiles, n_slices, _num_sms(device_index), bh, split_k)
     ws = torch.empty((n_slices, split_k, num_tokens, r_pad), dtype=torch.float32, device=x.device)
     return splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, block_m, bh, stages,
-                       rank_skip=rank_skip, rank_probe=rank_probe, force_rank=force_rank)
+                       index=index, rank_skip=rank_skip, rank_probe=rank_probe, force_rank=force_rank)
 
 
 def rankfuse_lora(
@@ -858,15 +860,16 @@ def rankfuse_lora(
     token_ranks [T]; scale_table [r_max + 1] fp32 or None. Returns out [T, sum(slice_sizes)].
     rank_sort=False is RF1 (pad to r_limit; split_k picks its path, section 8); rank_sort=True
     is the one-kernel rf2_fused. rank_skip=True is RF2 on RF1's split-K path: each block runs at
-    its own rank bucket, over the batch's order; a caller wanting rank order passes sorted inputs.
+    its own rank bucket, over the batch's order (a caller wanting rank order passes sorted inputs),
+    or with rank_sort too, over the rank-sorted order (rf2_index; order, or argsort by default).
     full_width=True keeps that same kernel but makes every block take the batch's bucket, the
     control that isolates skipping. rank_probe=1 or 2 is RF1's full width plus the rank read, or
     the read and one branch (diagnostics). See the module docstring, section 5, for every option.
     """
     if split_k is not None and split_k < 0:
         raise ValueError(f"split_k must be None, 0 or positive, got {split_k}")
-    if rank_skip and (split_k == 0 or rank_sort):
-        raise ValueError("rank_skip runs on the split-K path over the batch's order; it cannot take split_k=0 or rank_sort")
+    if rank_skip and split_k == 0:
+        raise ValueError("rank_skip runs on the split-K path; it cannot take split_k=0")
     if rank_probe not in (0, 1, 2) or (rank_probe and (rank_skip or rank_sort or split_k == 0)):
         raise ValueError("rank_probe is 1 or 2, on RF1's split-K path only")
     if full_width and not rank_skip:
@@ -923,8 +926,11 @@ def rankfuse_lora(
     if r_pad > MAX_R_PAD:
         raise ValueError(f"ranks above {MAX_R_PAD} are not supported")
     if rank_skip or (not rank_sort and split_k != 0):
+        index = None
+        if rank_skip and rank_sort:
+            index = (order if order is not None else torch.argsort(token_ranks, stable=True)).to(torch.int32)
         return _splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table, split_k,
-                       rank_skip, r_limit if full_width or rank_probe == 2 else 0, rank_probe)
+                       rank_skip, r_limit if full_width or rank_probe == 2 else 0, rank_probe, index=index)
 
     # Token blocks, column split, and grid.
     block_m = _block_m(num_tokens, r_pad)

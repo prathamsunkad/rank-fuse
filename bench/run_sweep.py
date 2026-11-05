@@ -149,8 +149,15 @@ def time_graph(fn, args, kwargs, warmup: int, reps: int, replays: int, flush_l2:
     graph = capture(call)
     flush_graph = capture(flush.zero_) if flush is not None else None
     torch.cuda.synchronize()
-    flush_us = statistics.median(per_replay_us(flush_graph) for _ in range(5)) if flush_graph else 0.0
-    return [per_replay_us(graph) - flush_us for _ in range(reps)]
+    if flush_graph is None:
+        return [per_replay_us(graph) for _ in range(reps)]
+    # The flush is timed right before each repetition and subtracted from it: repeats differed by
+    # up to 6.4% with one flush median taken up front, 2.5% this way (bench/flush_timing_check.py).
+    times = []
+    for _ in range(reps):
+        flush_us = per_replay_us(flush_graph)
+        times.append(per_replay_us(graph) - flush_us)
+    return times
 
 
 def expand_grid(grid: dict, shapes: dict | None = None, batches: list | None = None) -> list[tuple[str, Workload]]:

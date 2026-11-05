@@ -19,11 +19,17 @@ from pathlib import Path
 
 FW = "rf2_segment_fw"
 SEG = "rf2_segment"
+IDX = "rf2_index"
+OVERHEAD_STEPS = ["rf2_probe_read", "rf2_probe_branch", FW, "rf2_index_fw"]
 COMPARISONS = [
     ("Cost of the RF2 path: rf1_fused vs full-width segment", "rf1_fused", FW, {}),
     ("Skipping alone: segment vs its full-width control", SEG, FW, {}),
     ("Net: segment vs rf1_fused", SEG, "rf1_fused", {}),
     ("Net: segment vs B1", SEG, "b1_padded", {}),
+    ("Skipping alone: sorted-index vs its full-width control", IDX, "rf2_index_fw", {}),
+    ("Index cost: segment vs sorted-index (read the sorted rows: same blocks)", SEG, IDX, {}),
+    ("Net: sorted-index vs rf1_fused", IDX, "rf1_fused", {}),
+    ("Net: sorted-index vs B1", IDX, "b1_padded", {}),
     ("Bucketed vs segment", "rf2_bucketed", SEG, {}),
     ("Bucketed: extra tuning", "rf2_bucketed_tuned", "rf2_bucketed", {}),
     ("Bucketed: concurrent streams vs one after another", "rf2_bucketed", "rf2_bucketed_seq", {}),
@@ -160,6 +166,60 @@ def ordering_table(groups: dict[tuple, list[dict]], gpu: str, floor: dict) -> st
     return rows_to_md(["r_max", "tokens", "workloads", "median", "min", "max", "sorted faster", "ties", "random faster"], rows)
 
 
+def _median_us(group: list[dict], impl: str) -> float | None:
+    values = [run["t"][impl, 0] for run in group if (impl, 0) in run["t"]]
+    return statistics.median(values) if values else None
+
+
+def overhead_table(groups: dict[tuple, list[dict]], gpu: str) -> str | None:
+    """One-rank batches: rf1_fused's time and what each step of the RF2 path adds, in us."""
+    rows = []
+    for key, group in groups.items():
+        run = group[0]
+        base = _median_us(group, "rf1_fused")
+        if run["gpu"] != gpu or run["dist"] not in ("all_min", "all_max") or base is None:
+            continue
+        steps = [_median_us(group, impl) for impl in OVERHEAD_STEPS]
+        if all(v is None for v in steps):
+            continue
+        rows.append([int(run["r_max"]), run["dist"], run["tokens"], f'{run["num_requests"]}x{run["tokens_per_request"] or "-"}', f"{base:.1f}",
+                     *("" if v is None else f"{v - base:+.2f} ({100 * (v / base - 1):+.1f}%)" for v in steps)])
+    if not rows:
+        return None
+    rows.sort(key=lambda r: (r[0], r[1], r[2]))
+    return rows_to_md(["r_max", "mix", "tokens", "batch", "rf1_fused us", *(f"{s} vs rf1" for s in OVERHEAD_STEPS)], rows)
+
+
+def assumption_table(groups: dict[tuple, list[dict]], gpu: str) -> str | None:
+    """Mixed batches under the two scheduler assumptions: physically sorted tokens (rf2_segment on
+    sorted batches) and a sorted index list (rf2_index on random-order batches, sort reported apart)."""
+    pairs = defaultdict(dict)
+    order_at = KEY.index("request_order")
+    for key, group in groups.items():
+        if group[0]["gpu"] == gpu and group[0]["dist"] not in ("all_min", "all_max"):
+            pairs[key[:order_at] + key[order_at + 1:]][group[0]["request_order"]] = group
+    rows = []
+    for both in pairs.values():
+        if "sorted" not in both or "random" not in both:
+            continue
+        srt, rnd = both["sorted"], both["random"]
+        rf1, b1 = _median_us(rnd, "rf1_fused"), _median_us(rnd, "b1_padded")
+        seg, idx = _median_us(srt, SEG), _median_us(rnd, IDX)
+        if rf1 is None or seg is None or idx is None:
+            continue
+        sort_us = [run["prepare"][IDX] - run["prepare"].get(SEG, 0.0) for run in rnd if IDX in run["prepare"]]
+        run = rnd[0]
+        rows.append([int(run["r_max"]), run["dist"], f'{run["num_requests"]}x{run["tokens_per_request"] or "-"}', run["tokens"],
+                     f"{rf1:.1f}", f"{rf1 / seg:.2f}x", f"{rf1 / idx:.2f}x",
+                     "" if b1 is None else f"{b1 / seg:.2f}x", "" if b1 is None else f"{b1 / idx:.2f}x",
+                     f"{statistics.median(sort_us):.0f}" if sort_us else ""])
+    if not rows:
+        return None
+    rows.sort(key=lambda r: (r[0], r[1], r[3]))
+    return rows_to_md(["r_max", "mix", "batch", "tokens", "rf1_fused us", "sorted tokens vs RF1", "sorted index vs RF1",
+                       "sorted tokens vs B1", "sorted index vs B1", "sort us (host, per step)"], rows)
+
+
 def baseline_table(runs: list[dict], baseline: list[dict], gpu: str) -> str | None:
     now = {(r["shape"], r["num_requests"], r["tokens_per_request"], r["r_max"], r["tiers"], r["dist"], r["seed"]): r
            for r in runs if r["gpu"] == gpu and r["mode"] == "write" and r["request_order"] in ("random", "")}
@@ -228,6 +288,12 @@ def main() -> None:
         table = launch_table(runs, eager, gpu)
         if table:
             out += ["### Python launch overhead (eager minus graph)", "", table, ""]
+        table = overhead_table(groups, gpu)
+        if table:
+            out += ["### Overhead with nothing to skip, in us (one-rank batches)", "", table, ""]
+        table = assumption_table(groups, gpu)
+        if table:
+            out += ["### Two scheduler assumptions: speedup of RF2 (above 1x is faster)", "", table, ""]
         table = ordering_table(mixed, gpu, floor)
         if table:
             out += ["### Does ordering requests help? rf2_segment, sorted vs random (bench/sort_cost.py has the sort's cost)", "", table, ""]

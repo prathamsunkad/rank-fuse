@@ -9,6 +9,11 @@ import torch
 
 from rankfuse.interface import Batch, MatryoshkaLoRA
 
+def _zipf(n: int, s: float) -> list[float]:
+    w = [1.0 / (i + 1) ** s for i in range(n)]
+    return [v / sum(w) for v in w]
+
+
 # Probability over n rank tiers, ordered smallest -> largest rank. The skews weight tiers
 # linearly (n, n-1, ..., 1): with 4 tiers that is 0.4/0.3/0.2/0.1.
 DISTRIBUTIONS: dict[str, Callable[[int], list[float]]] = {
@@ -17,6 +22,10 @@ DISTRIBUTIONS: dict[str, Callable[[int], list[float]]] = {
     "uniform": lambda n: [1.0 / n] * n,
     "skew_low": lambda n: [(n - i) / (n * (n + 1) / 2) for i in range(n)],
     "skew_high": lambda n: [(i + 1) / (n * (n + 1) / 2) for i in range(n)],
+    # Low-rank heavy with a long tail of high ranks: weight 1/(i+1)^s for tier i. With r_max 256's
+    # nine pow2 tiers, ranks 1-16 take 81% (s=1) or 95% (s=2) of requests and r_max 4% or 1%.
+    "zipf_1": lambda n: _zipf(n, 1.0),
+    "zipf_2": lambda n: _zipf(n, 2.0),
 }
 
 # Controlled mixes, not sampled: "low_frac_<pct>" puts round(pct% of requests) at the lowest tier

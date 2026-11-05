@@ -29,6 +29,8 @@ The split-K variants below all launch rf1_fused's kernels (rankfuse_fused.splitk
 differ only in how tokens are read and how wide each group runs:
 * rankfuse_rf2_segment.py  - rf2_segment: per-block rank buckets over the batch's own order, sorted
                              or not, and rf2_segment_fw, its full-width control. The main RF2.
+* rankfuse_rf2_index.py    - rf2_index: the same buckets over a sorted index list, tokens left in
+                             batch order, and rf2_index_fw. For the sorted-index assumption.
 * rankfuse_rf2_bucketed.py - rf2_bucketed: one launch per rank bucket on concurrent streams, from a
                              per-step CPU plan, and rf2_bucketed_tuned with per-bucket block sizes.
 
@@ -46,5 +48,5 @@ from importlib.util import find_spec
 
 if find_spec("triton") is not None:
     from rankfuse.kernels import rankfuse_fused, rankfuse_mask, rankfuse_ragged  # noqa: F401
-    from rankfuse.kernels import rankfuse_rf2_bucketed, rankfuse_rf2_segment  # noqa: F401
+    from rankfuse.kernels import rankfuse_rf2_bucketed, rankfuse_rf2_index, rankfuse_rf2_segment  # noqa: F401
 
