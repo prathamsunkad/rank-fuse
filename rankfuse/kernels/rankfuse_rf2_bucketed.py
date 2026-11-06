@@ -96,21 +96,26 @@ def rf2_bucketed(x, A_t, B, token_ranks, plan: Plan, out=None, add=False, scale_
     r_pad = max(16, triton.next_power_of_2(r_limit))
     dev = x.device.index or 0
     tiled = T > rf.EXPAND_TILED_MIN_TOKENS
-    # (R, idx, count, BM, BH, stages): rf1_fused's rules, or each bucket's own when tuned.
+    # (R, idx, count, BM, BH, stages, cfg): rf1_fused's settings at the batch width, or each
+    # bucket's own when tuned (rf._config at R; the hand table in block_m when nothing is tuned).
     groups = []
     for R, idx, count, tuned_bm in plan.buckets:
-        bm = tuned_bm if tuned else rf._block_m(T, r_pad)
-        bh, stages = rf._splitk_shrink_tiles(bm, R if tuned else r_pad, x.element_size(), dev)
-        groups.append((R, idx, count, bm, bh, stages))
+        if tuned:
+            cfg = rf._config(R, T, dev, bm=tuned_bm, bn=256 if tuned_bm <= 64 else 128)
+        else:
+            cfg = rf._config(r_pad, T, dev)
+        bm = cfg["bm"]
+        bh, stages = rf._splitk_shrink_tiles(bm, R if tuned else r_pad, x.element_size(), dev, cfg["bh"], cfg["stages"])
+        groups.append((R, idx, count, bm, bh, stages, cfg))
     grid_tiles = sum(triton.cdiv(g[2], g[3]) for g in groups)
     bh_min = min(g[4] for g in groups)
     split_k, k_per = rf._split_count(h_in, tiled, grid_tiles, n_slices, rf._num_sms(dev), bh_min)  # k_per: a multiple of bh_min
     ws = torch.empty((n_slices, split_k, T, r_pad), dtype=torch.float32, device=x.device)
 
-    def launch(R, idx, count, bm, bh, stages, ws_row0):
+    def launch(R, idx, count, bm, bh, stages, cfg, ws_row0):
         rf.splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, bm,
                        bh if k_per % bh == 0 else bh_min, stages, index=idx, count=count, ws_row0=ws_row0, grid_tiles=grid_tiles,
-                       rank=R, block_n=(256 if bm <= 64 else 128) if tuned else None)
+                       rank=R, block_n=cfg["bn"], shrink_warps=cfg["shrink_warps"], expand_warps=cfg["expand_warps"])
 
     ws_row0 = 0  # each bucket takes its own workspace rows, in its own order
     if concurrent and len(groups) > 1:

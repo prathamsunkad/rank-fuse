@@ -33,6 +33,8 @@ differ only in how tokens are read and how wide each group runs:
                              batch order, and rf2_index_fw. For the sorted-index assumption.
 * rankfuse_rf2_bucketed.py - rf2_bucketed: one launch per rank bucket on concurrent streams, from a
                              per-step CPU plan, and rf2_bucketed_tuned with per-bucket block sizes.
+* rankfuse_rf2_ranges.py   - rf2_ranges: on rank-sorted rows, one RF1 launch per bucket over that
+                             bucket's contiguous rows, at its own width and launch settings.
 
 Next TODOs: accept a scheduler-prepared rank order so RF2 can reuse it across layers, autotune
 tile sizes, and profile actual DRAM/L2 traffic. Rank sorting aims to improve prefix reuse; it
@@ -49,4 +51,5 @@ from importlib.util import find_spec
 if find_spec("triton") is not None:
     from rankfuse.kernels import rankfuse_fused, rankfuse_mask, rankfuse_ragged  # noqa: F401
     from rankfuse.kernels import rankfuse_rf2_bucketed, rankfuse_rf2_index, rankfuse_rf2_segment  # noqa: F401
+    from rankfuse.kernels import rankfuse_rf2_ranges  # noqa: F401
 

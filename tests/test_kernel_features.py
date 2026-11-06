@@ -249,7 +249,7 @@ def test_b1_graphed_repeated_replays():
 # add mode, an output column view and graph capture with per-step metadata built before capture.
 BUCKETED = ("rf2_bucketed", "rf2_bucketed_tuned", "rf2_bucketed_seq")
 RF2_VARIANTS = pytest.mark.parametrize(
-    "name", ["rf2_segment", "rf2_segment_fw", "rf2_index", "rf2_index_fw", *BUCKETED]
+    "name", ["rf2_segment", "rf2_segment_fw", "rf2_index", "rf2_index_fw", *BUCKETED, "rf2_ranges", "rf2_ranges_seq"]
 )
 
 
@@ -265,6 +265,10 @@ def _rf2_metadata(name, x, token_ranks):
         return dict(r_limit=r_limit)
     if name.startswith("rf2_index"):
         return dict(r_limit=r_limit, order=torch.argsort(token_ranks, stable=True).to(torch.int32))
+    if name.startswith("rf2_ranges"):
+        from rankfuse.kernels.rankfuse_rf2_ranges import RangePlan
+
+        return dict(plan=RangePlan(token_ranks))
     from rankfuse.kernels.rankfuse_rf2_bucketed import Plan
 
     return dict(plan=Plan(token_ranks, x.device))
@@ -354,3 +358,63 @@ def test_sorted_batch_preserves_requests():
     assert batch.token_ranks.tolist() == sorted(batch.token_ranks.tolist())
     got = REGISTRY["rf2_segment"](batch.x, lora, batch.token_ranks)
     _assert_close(got, REGISTRY["b0_reference"](batch.x, lora, batch.token_ranks), torch.float32)
+
+
+# rf2_ranges: per-bucket launches over the contiguous rows of a rank-sorted batch.
+def test_range_plan_runs():
+    """Sorted ranks give one run per bucket (heaviest first) and rank-0 rows as zero runs;
+    unsorted ranks fall back to one run at the batch's bucket."""
+    from rankfuse.kernels.rankfuse_rf2_ranges import RangePlan
+
+    plan = RangePlan([0, 0, 3, 16, 17, 30, 200])
+    assert plan.sorted and plan.zero_runs == [(0, 2)]
+    assert sorted(plan.runs) == [(16, 2, 4, 16), (32, 4, 6, 30), (256, 6, 7, 200)]
+    assert plan.runs[0][0] == 256  # 1 row x 256 is heavier than 2 rows x 32 or x 16
+    unsorted = RangePlan([4, 200, 4, 0])
+    assert not unsorted.sorted and unsorted.zero_runs == [] and unsorted.runs == [(256, 0, 4, 200)]
+    assert RangePlan([0, 0]).runs == [] and RangePlan([]).runs == []
+
+
+@pytest.mark.parametrize("name", ["rf2_ranges", "rf2_ranges_seq"])
+@pytest.mark.parametrize("add", [False, True], ids=["write", "add"])
+@pytest.mark.parametrize("T", [37, 300, 1100], ids=["decode-37", "prefill-300", "prefill-1100"])
+def test_rf2_ranges_sorted(name, add, T):
+    """Sorted batch spanning every bucket, rank-0 rows first, r_max 200 (not a power of two, so the
+    256 bucket must stop at row 200): matches B0 in write and add mode."""
+    ranks = sorted([0, 1, 9, 16, 20, 40, 64, 100, 128, 150, 200][i % 11] for i in range(T))
+    x, lora, token_ranks = _rf2_lora(T, 256, 192, 200, torch.float16, seed=21, ranks=ranks)
+    out = torch.randn(T, 192, device="cuda", dtype=torch.float16)
+    before = out.clone()
+    REGISTRY[name](x, lora, token_ranks, out=out, add=add)
+    expected = REGISTRY["b0_reference"](x, lora, token_ranks).float()
+    if add:
+        expected = expected + before.float()
+    _assert_close(out, expected, torch.float16)
+
+
+def test_rf2_ranges_sorted_graph_capture():
+    """Concurrent per-bucket launches (forked streams) captured in one graph and replayed on new x."""
+    from rankfuse.kernels.rankfuse_rf2_ranges import RangePlan
+
+    T = 300
+    ranks = sorted([0, 4, 20, 50, 100, 256][i % 6] for i in range(T))
+    x, lora, token_ranks = _rf2_lora(T, 256, 128, 256, torch.float32, seed=22, ranks=ranks)
+    plan = RangePlan(token_ranks)
+    assert plan.sorted and len(plan.runs) == 5
+    out = torch.empty(T, 128, device="cuda")
+
+    def run():
+        REGISTRY["rf2_ranges"](x, lora, token_ranks, out=out, plan=plan)
+
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        run()
+    torch.cuda.current_stream().wait_stream(stream)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        run()
+    x.copy_(_rf2_lora(T, 256, 128, 256, torch.float32, seed=23, ranks=ranks)[0])
+    graph.replay()
+    torch.cuda.synchronize()
+    _assert_close(out, REGISTRY["b0_reference"](x, lora, token_ranks), torch.float32)

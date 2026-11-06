@@ -33,7 +33,7 @@ ABLATIONS: dict[str, dict] = {
     "no_tile_expand": {"EXPAND_TILED_MIN_TOKENS": 10**9},
     "tile_expand_4_warps": {"EXPAND_TILED_WARPS": 4},
     "no_aligned_hint": {"USE_ALIGNED_HINT": False},
-    "fixed_16_token_blocks": {"_block_m": lambda num_tokens, r_pad: 16},
+    "fixed_16_token_blocks": {"_block_m": lambda num_tokens, r_pad: 16, "TUNED": {}},
     "separate_add_pass": {},  # the delta is written, then added to the output in a second pass
     "tuned_again": {},
 }

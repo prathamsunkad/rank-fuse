@@ -206,6 +206,7 @@ r_max 128-256, GPUs with less shared memory).
 """
 
 import functools
+import os
 
 import torch
 import triton
@@ -728,6 +729,45 @@ def _scale_table(lora: MatryoshkaLoRA, device: torch.device) -> torch.Tensor | N
     return cached[1]
 
 
+# Per-width launch settings (bench/tune_blocks.py). TUNED maps (width, token range) to settings
+# that override the defaults below; it is filled from rankfuse/kernels/tuned_a100.py only on the
+# GPU it was tuned on, so other GPUs keep the default rules. Every split-K kernel looks settings up
+# here: RF1, rf2_segment and rf2_index at the batch's width, per-bucket kernels at each bucket's.
+TOKEN_RANGES = (128, 1024, 4096)  # upper bounds of ranges 0..2; range 3 is everything above
+TUNED: dict[tuple[int, int], dict] = {}
+TUNED_GPU = ""
+if os.environ.get("RANKFUSE_TUNED", "1") != "0":  # RANKFUSE_TUNED=0: default rules (before/after runs)
+    try:
+        from rankfuse.kernels.tuned_a100 import GPU as TUNED_GPU, TUNED  # noqa: F811
+    except ImportError:
+        pass
+
+
+def _token_range(num_tokens: int) -> int:
+    for i, hi in enumerate(TOKEN_RANGES):
+        if num_tokens <= hi:
+            return i
+    return len(TOKEN_RANGES)
+
+
+@functools.lru_cache(maxsize=None)
+def _gpu_name(device_index: int) -> str:
+    return torch.cuda.get_device_name(device_index)
+
+
+def _config(width: int, num_tokens: int, device_index: int = 0, bm: int | None = None, bn: int | None = None) -> dict:
+    """Launch settings for one group of num_tokens tokens at `width` rank rows.
+
+    Keys: bm (tokens per program), shrink_warps, bh and stages (None: the shrink-tile rule),
+    bn and expand_warps for the tiled expand (None: EXPAND_TILED_BLOCK_N / _WARPS). bm and bn
+    are the caller's defaults when there is no tuned entry (None: _block_m and the module rule)."""
+    cfg = dict(bm=_block_m(num_tokens, width) if bm is None else bm, shrink_warps=4, bh=None, stages=None,
+               bn=bn, expand_warps=None)
+    if TUNED and _gpu_name(device_index) == TUNED_GPU:
+        cfg.update(TUNED.get((width, _token_range(num_tokens)), {}))
+    return cfg
+
+
 def _block_m(num_tokens: int, r_pad: int) -> int:
     # Small token blocks for decode; larger ones for prefill, but keep v [BM, R_PAD] in fp32
     # registers at <= 32 KiB per program.
@@ -743,11 +783,14 @@ def _max_shared_mem(device_index: int) -> int:
     return triton.runtime.driver.active.utils.get_device_properties(device_index)["max_shared_mem"]
 
 
-def _splitk_shrink_tiles(block_m: int, r_pad: int, elem_size: int, device_index: int) -> tuple[int, int]:
-    """(BH, num_stages) for the split-K shrink: SPLITK_BLOCK_H and SPLITK_STAGES, reduced
-    while the x and A_t tiles of all pipeline stages would exceed ~70% of shared memory."""
+def _splitk_shrink_tiles(block_m: int, r_pad: int, elem_size: int, device_index: int,
+                         bh: int | None = None, stages: int | None = None) -> tuple[int, int]:
+    """(BH, num_stages) for the split-K shrink: SPLITK_BLOCK_H and SPLITK_STAGES (or the given
+    values), reduced while the x and A_t tiles of all pipeline stages would exceed ~70% of
+    shared memory."""
     budget = int(0.7 * _max_shared_mem(device_index))
-    bh, stages = SPLITK_BLOCK_H, SPLITK_STAGES
+    bh = SPLITK_BLOCK_H if bh is None else bh
+    stages = SPLITK_STAGES if stages is None else stages
     while stages > 2 and (block_m + r_pad) * bh * elem_size * stages > budget:
         stages -= 1
     while bh > 32 and (block_m + r_pad) * bh * elem_size * stages > budget:
@@ -765,7 +808,8 @@ def _split_count(h_in: int, tiled: bool, grid_tiles: int, n_slices: int, num_sms
 
 
 def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, block_m, bh, stages,
-                *, index=None, count=None, ws_row0=0, grid_tiles=None, rank=None, rank_skip=False, rank_probe=0, force_rank=0, block_n=None):
+                *, index=None, count=None, ws_row0=0, grid_tiles=None, rank=None, rank_skip=False, rank_probe=0, force_rank=0, block_n=None,
+                shrink_warps=4, expand_warps=None):
     """Launch the two split-K kernels for one group of tokens; every RF1 and RF2 variant comes here.
 
     Tokens: the batch in order (index None), or index[:count] through a lookup, with partials in
@@ -773,7 +817,8 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
     rank_skip, each block's own bucket at run time, never below force_rank. rank_probe keeps one
     width and adds part of the rank-skipping path, to measure it: 1 the rank read, 2 also one
     branch. grid_tiles is the token
-    block count across all groups launched together; block_n overrides the tiled expand's tile.
+    block count across all groups launched together; block_n and expand_warps override the tiled
+    expand's tile and warps, shrink_warps the shrink's warps (from _config).
     """
     num_tokens, h_in = x.shape
     n_slices, r_max, _ = A_t.shape
@@ -787,7 +832,7 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
     index_ptr = token_ranks if index is None else index
     _splitk_shrink_kernel[(m_tiles, split_k, n_slices)](
         x, A_t, token_ranks, index_ptr, ws, count, ws_row0, num_tokens, h_in, r_limit, force_rank, k_per, r_max * h_in, ws_slice,
-        BM=block_m, BH=bh, R=r, R_PAD=r_pad, INDEXED=index is not None, RANK_SKIP=rank_skip, RANK_PROBE=rank_probe, num_warps=4, num_stages=stages,
+        BM=block_m, BH=bh, R=r, R_PAD=r_pad, INDEXED=index is not None, RANK_SKIP=rank_skip, RANK_PROBE=rank_probe, num_warps=shrink_warps, num_stages=stages,
     )
 
     widest = max(sizes)
@@ -803,7 +848,7 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
         block_n = EXPAND_TILED_BLOCK_N if block_n is None else block_n
         while block_n > 64 and guard_r * block_n * x.element_size() > 0.35 * _max_shared_mem(device_index):
             block_n //= 2
-        cols_per_prog, warps = block_n, EXPAND_TILED_WARPS
+        cols_per_prog, warps = block_n, EXPAND_TILED_WARPS if expand_warps is None else expand_warps
     else:
         block_n, warps = EXPAND_BLOCK_N, EXPAND_WARPS
         n_tiles = triton.cdiv(widest, block_n)
@@ -826,14 +871,16 @@ def _splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table
     num_tokens, h_in = x.shape
     n_slices = A_t.shape[0]
     device_index = x.device.index or 0
-    block_m = _block_m(num_tokens, r_pad)
+    cfg = _config(r_pad, num_tokens, device_index)
+    block_m = cfg["bm"]
     m_tiles = triton.cdiv(num_tokens, block_m)
-    bh, stages = _splitk_shrink_tiles(block_m, r_pad, x.element_size(), device_index)
+    bh, stages = _splitk_shrink_tiles(block_m, r_pad, x.element_size(), device_index, cfg["bh"], cfg["stages"])
     tiled = num_tokens > EXPAND_TILED_MIN_TOKENS
     split_k, k_per = _split_count(h_in, tiled, m_tiles, n_slices, _num_sms(device_index), bh, split_k)
     ws = torch.empty((n_slices, split_k, num_tokens, r_pad), dtype=torch.float32, device=x.device)
     return splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, block_m, bh, stages,
-                       index=index, rank_skip=rank_skip, rank_probe=rank_probe, force_rank=force_rank)
+                       index=index, rank_skip=rank_skip, rank_probe=rank_probe, force_rank=force_rank,
+                       block_n=cfg["bn"], shrink_warps=cfg["shrink_warps"], expand_warps=cfg["expand_warps"])
 
 
 def rankfuse_lora(
