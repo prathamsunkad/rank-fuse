@@ -7,10 +7,13 @@ section 8) are launched compiled for exactly R rows, reading tokens through the 
 bucket runs on its own CUDA stream, forked from and joined back to the current stream (capturable
 in a CUDA graph), heaviest bucket first, so light buckets fill the SMs alongside it.
 
-Block size, tile and shared-memory rules are rf1_fused's, so rf2_bucketed differs from it only in
-rank width, index reads and launches. `rf2_bucketed_tuned` adds what bucketing makes possible:
-larger token blocks for low buckets (128 tokens for buckets 16 and 32 above 128 tokens) with their
-tiles and pipeline sized for each bucket. Report it as extra tuning, not as skipping.
+Block size, tile and shared-memory rules are rf1_fused's at the batch's width (rf._config, tuned
+table included), so rf2_bucketed differs from it only in rank width, index reads and launches.
+`rf2_bucketed_tuned` adds what bucketing makes possible: launch settings looked up at each
+bucket's own width. Its defaults are the hand table in block_m (128 tokens for buckets 16 and 32
+above 128 tokens); on a GPU with a tuned table, that table's entry for the bucket replaces them.
+Report it as extra tuning, not as skipping. rankfuse_rf2_ranges.py gets per-bucket settings
+without an index, from contiguous rows on rank-sorted batches.
 
 use_rf2 below is the CPU-side rule that picks rf2_bucketed over rf1_fused; it was fitted on the
 earlier tuned kernel and one H200 sweep.

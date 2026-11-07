@@ -1,4 +1,11 @@
-"""RF2: rank-sorted tiles that fuse LoRA and stop after each tile's last rank band."""
+"""rf2_ragged: the first RF2, rf1_masked's one-kernel layout over a rank-sorted order.
+
+The host sorts token indices by rank (argsort per call). Each program takes BLOCK_M positions of
+that order and one output column tile, reads its tokens' ranks, and loops over 16-row rank bands
+only up to the tile's own maximum rank, writing each result to the token's own row. Like
+rf1_masked it recomputes the shrink for every column tile; the current RF2 variants run on
+rf1_fused's split-K base instead (rankfuse_rf2_segment.py and the others). Kept as an ablation.
+"""
 
 import torch
 import triton

@@ -94,8 +94,10 @@ rankfuse/
   reference.py        B0 reference (correctness oracle)
   baselines/          B1 padded+mask (+ graphed), B2 grouped (+ graphed), B3 vLLM's kernels
                       (vllm_ops.py); B4 stub with a plan
-  kernels/            RF1 (rankfuse_fused.py: split-K rf1_fused, rf1_single) and RF2
-                      (rf2_fused; rankfuse_rf2_segment/bucketed.py) Triton kernels
+  kernels/            Triton kernels. rankfuse_fused.py: the shared split-K base and RF1
+                      (rf1_fused); RF2 variants in rankfuse_rf2_{segment,index,bucketed,ranges}.py;
+                      tuned_a100.py: per-width launch settings for one A100; earlier one-kernel
+                      ablations: rf1_single, rf2_fused, rankfuse_mask.py, rankfuse_ragged.py
   workloads.py        seeded shapes and rank distributions
   roofline.py         analytic bytes/FLOPs/lower-bound per strategy
 tests/                correctness vs B0 for every registered impl; kernel serving features; roofline
@@ -164,8 +166,8 @@ captures each call in a CUDA graph and reports GPU time only.
 ```python
 from rankfuse.interface import register, apply_scale
 
-@register("rf1_masked", requires_cuda=True)
-def rf1_masked(x, lora, token_ranks):   # x [T, h_in], lora.A_t [r_max, h_in], lora.B [r_max, h_out]
+@register("my_kernel", requires_cuda=True)   # a new, unused name
+def my_kernel(x, lora, token_ranks):   # x [T, h_in], lora.A_t [r_max, h_in], lora.B [r_max, h_out]
     ...
     return apply_scale(y, lora, token_ranks)   # y [T, h_out], LoRA delta only
 ```

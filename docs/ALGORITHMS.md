@@ -538,8 +538,12 @@ comparable to S-LoRA's adapter-scaling results.
 | What | File |
 |---|---|
 | RF1 split-K (`rf1_fused`), RF1 single kernel (`rf1_single`), RF2 sorted single kernel (`rf2_fused`) | `rankfuse/kernels/rankfuse_fused.py` |
-| Segment RF2 (`rf2_segment`) | `rankfuse/kernels/rankfuse_rf2_segment.py` |
-| Bucketed RF2 (`rf2_bucketed`, `use_rf2`) | `rankfuse/kernels/rankfuse_rf2_bucketed.py` |
+| Segment RF2 (`rf2_segment`, `rf2_segment_fw`, `rf2_probe_read`, `rf2_probe_branch`) | `rankfuse/kernels/rankfuse_rf2_segment.py` |
+| Sorted-index RF2 (`rf2_index`, `rf2_index_fw`) | `rankfuse/kernels/rankfuse_rf2_index.py` |
+| Bucketed RF2 (`rf2_bucketed`, `rf2_bucketed_tuned`, `rf2_bucketed_seq`, `use_rf2`) | `rankfuse/kernels/rankfuse_rf2_bucketed.py` |
+| Per-bucket row-range RF2 (`rf2_ranges`, `rf2_ranges_seq`) | `rankfuse/kernels/rankfuse_rf2_ranges.py` |
+| Per-width launch settings (`_config`) and the A100 table | `rankfuse/kernels/rankfuse_fused.py`, `rankfuse/kernels/tuned_a100.py`, `bench/tune_blocks.py` |
+| First RF1 and RF2 kernels (`rf1_masked`, `rf2_ragged`), kept as ablations | `rankfuse/kernels/rankfuse_mask.py`, `rankfuse/kernels/rankfuse_ragged.py` |
 | B0 reference, B1 padded (+ graphed) | `rankfuse/reference.py`, `rankfuse/baselines/padded.py` |
 | B3 (vLLM kernels, padded rank copies, `b3_vllm`) | `rankfuse/baselines/vllm_ops.py` |
 | One-layer sweep (eager or CUDA-graph timing) | `bench/run_sweep.py` |

@@ -1,8 +1,9 @@
 # RF2 testing: kernels, assumptions and why each test exists
 
 This explains how RF1 and the RF2 variants differ, which scheduler assumptions we test, and why
-each sweep is needed. Measured numbers so far are from one NVIDIA A100 80GB PCIe (commit
-234cf31); every new sweep is pinned to that GPU type.
+each sweep is needed. Measured numbers so far are from one NVIDIA A100 80GB PCIe (the 5 Nov
+sweep at commit 7871e06, before the tuned launch table of 12bf0f6); every new sweep is pinned to
+that GPU type.
 
 ## What every kernel computes
 For each token t with rank r_t: `out[t] (+)= scale(r_t) · (x[t] · A_t[:r_t]ᵀ) · B[:r_t]`, using one
@@ -78,7 +79,7 @@ RF1 and every split-K RF2 variant launch the same two kernels through `splitk_pa
 | Add into output | `add=True` adds the delta in the expand, with no separate pass over the output |
 | Two expand modes | Up to 128 tokens: column loop, about 4 programs per SM. Above: one tile of up to 256 columns per program, 8 warps |
 | Aligned stores | A `tl.multiple_of` hint vectorizes output stores (67 → 45 µs at 8192 tokens on the H200) |
-| Block size rule | `_block_m(T, r_pad)`: 16 tokens up to 128 tokens, else 64/32/16 by batch width, keeping `v` within 32 KiB of registers |
+| Block size rule | `_config(width, T)`: by default `_block_m` (16 tokens up to 128 tokens, else 64/32/16 by width, keeping `v` within 32 KiB of registers), replaced by the tuned table's entry on its GPU (see Per-width launch settings) |
 | Shrink tiles | 128-wide h_in chunks, 3 pipeline stages, reduced only if shared memory runs out |
 | Width rounding | Width rounded up to a power of two of at least 16 (`tl.dot` needs ≥ 16); extra rows load as zero |
 | Fused slices | q/k/v or gate/up projections in one launch |
@@ -97,7 +98,9 @@ RF1 and every split-K RF2 variant launch the same two kernels through `splitk_pa
 1. **Narrow blocks inherit the batch's block size (works against RF2).**
    A program handles BM tokens and keeps their `v [BM, width]` in fp32 registers. To keep that
    within 32 KiB, `_block_m` picks BM from the **batch's** width, once per call: 64 tokens at
-   width 64, 32 at 128, 16 at 256. Width 16 could use 64 tokens (only 4 KiB).
+   width 64, 32 at 128, 16 at 256. Width 16 could use 64 tokens (only 4 KiB). The tuned table
+   changes those values on its GPU but is still looked up at the batch's width for one-launch
+   kernels.
 
    With one r_max 256 request, the batch width is 256, so every block gets BM = 16, including the
    rank-16 blocks that make up most of the batch. Compared with an all-low batch (BM = 64), those
@@ -109,6 +112,7 @@ RF1 and every split-K RF2 variant launch the same two kernels through `splitk_pa
    This comes from a choice in the shared kernel, not something inherent. `_block_m` is a
    register-budget rule written for RF1, where every block has the same width; RF2 inherited it.
    Triton fixes BM per launch at compile time, so it can't change per block within one launch.
+   `rf2_ranges` and `rf2_bucketed_tuned` avoid it by launching once per bucket.
 
 2. **Unused width arms cost time (works against RF2).**
    RF2's kernel has one code path ("arm") per possible width (16, 32, 64, 128, 256), all compiled
@@ -121,9 +125,10 @@ RF1 and every split-K RF2 variant launch the same two kernels through `splitk_pa
    outlier batch, whose kernel is compiled with all five arms. That case is unmeasured, because
    `all_min` batches compile only the 16-row arm.
 
-3. **RF1 was tuned at r_max 64 only (works for RF2).** Going from r_max 128 to 256 costs RF1
-   2.7–3.1×, not 2×, so part of any r_max 256 win could be RF1 being slow. Every skew result is
-   also compared with `b1_padded`.
+3. **RF1 was tuned at r_max 64 only (works for RF2), in the 5 Nov results.** There, going from
+   r_max 128 to 256 cost RF1 2.7–3.1×, not 2×, so part of any r_max 256 win could be RF1 being
+   slow. The A100 tuned table (below) now tunes every width, including RF1's, so those results
+   predate the fix; every skew result is also compared with `b1_padded`.
 
 ## Per-width launch settings (tuning)
 Block size, warps and tile settings are looked up per **(width, token count range)** in one table,

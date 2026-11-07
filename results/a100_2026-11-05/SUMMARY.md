@@ -6,6 +6,10 @@ Commit 7871e06, add mode, CUDA-graph timing with the L2 flush timed before each 
 time(baseline) ÷ time(kernel), so above 1× means the kernel is faster. RF1 repeat noise was within
 about 2.6% at every size.
 
+These runs predate the A100 tuned launch table (`rankfuse/kernels/tuned_a100.py`, commit 12bf0f6),
+which changes the settings of `rf1_fused` and every split-K RF2 on this GPU. Conclusions that rest
+on RF1's untuned r_max 256 speed (section 2) need a re-run with the table.
+
 Assumptions: "sorted tokens" is `rf2_segment` on physically sorted batches; "sorted index" is
 `rf2_index` on random-order batches. `rf2_bucketed` reads through per-bucket indices, so it doesn't
 depend on order.

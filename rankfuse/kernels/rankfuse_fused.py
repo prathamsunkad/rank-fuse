@@ -3,10 +3,12 @@
     rf1_fused   pad every token to the batch maximum rank and mask per token (B1's math), on
                 the split-K path of section 8 (two kernels)
     rf1_single  the same math in ONE kernel (sections 3-4), kept as the fusion ablation
-    rf2_fused   the same, but tokens are sorted by rank and each token block stops at its own
-                maximum rank, so low-rank blocks load and multiply fewer rank rows
+    rf2_fused   rf1_single's one kernel, but tokens are sorted by rank and each token block stops
+                at its own maximum rank, so low-rank blocks load and multiply fewer rank rows.
+                Kept as an ablation; the current RF2 variants (rf2_segment, rf2_index,
+                rf2_bucketed, rf2_ranges) run on the split-K path through `splitk_pass`
 
-Both are thin wrappers around `rankfuse_lora`, which also takes the options a serving engine
+All are thin wrappers around `rankfuse_lora`, which also takes the options a serving engine
 needs: adding into an existing output, several output slices in one launch (fused QKV or
 gate/up projections), and a caller-supplied r_limit so the call is CUDA-graph capturable.
 
@@ -45,11 +47,12 @@ v[t, k] for k >= r_t removes rank component k from token t only, because
 y[t, n] = sum_k v[t, k] * B[k, n]. So B1 vs rf1_fused measures fusion alone: one launch
 instead of ~6-7, and v never leaves the chip.
 
-rf2_fused adds rank skipping. The host sorts token indices by rank, so each token block holds
-tokens of similar rank. Each program reads its block's maximum rank and runs a version of the
-tile compiled for the smallest rank bucket (16/32/64/128/256) that covers it. A block of
-rank-8 tokens loads 16 rank rows of A_t and B instead of r_limit. rf1_fused vs rf2_fused
-measures the benefit of skipping unused ranks (Claim 2).
+RF2 adds rank skipping. In rf2_fused the host sorts token indices by rank, so each token block
+holds tokens of similar rank. Each program reads its block's maximum rank and runs a version of
+the tile compiled for the smallest rank bucket (16/32/64/128/256) that covers it. A block of
+rank-8 tokens loads 16 rank rows of A_t and B instead of r_limit. The split-K RF2 variants
+(section 8) skip the same way; RF1 vs RF2 measures the benefit of skipping unused ranks
+(Claim 2).
 
 =====================================================================================
 3. Work split: why the shrink is computed once per program
@@ -114,10 +117,19 @@ add=True); every other read of x, A_t and B by a second program is usually serve
     r_limit         batch maximum rank. Leave it None in benchmarks so the call pays the same
                     single host sync as B1. A serving engine passes it (the adapter's r_max
                     works), which removes every host sync.
-    order           rf2 only: a precomputed rank-sorted token order (the scheduler can build it
-                    once per step and reuse it across layers). Default: torch.argsort.
-    split_k         rf1 only. None (default): the split-K path of section 8 with an automatic
-                    slice count; 0: the single-kernel path; n >= 1: split-K with about n slices.
+    rank_sort       True: read tokens through a rank-sorted order. Alone, the one-kernel
+                    rf2_fused; with rank_skip, rf2_index.
+    order           with rank_sort: a precomputed rank-sorted token order (the scheduler can build
+                    it once per step and reuse it across layers). Default: torch.argsort.
+    rank_skip       RF2 on the split-K path: each token block runs at its own rank bucket, chosen
+                    in the kernel (rf2_segment; rf2_index with rank_sort).
+    full_width      with rank_skip: every block takes the batch's bucket through the same binary,
+                    the control that isolates skipping (rf2_segment_fw, rf2_index_fw).
+    rank_probe      1 or 2, RF1's split-K path only: add the rank read, or the read and one
+                    branch, at one compiled width (rf2_probe_read, rf2_probe_branch; diagnostics).
+    split_k         without rank_sort or rank_skip. None (default): the split-K path of section 8
+                    with an automatic slice count; 0: the single-kernel path (rf1_single);
+                    n >= 1: split-K with about n slices.
 
 CUDA graphs: with r_limit passed, rankfuse_lora makes no host syncs and allocates nothing but
 `out` (when not given) and rf2's sort. Call it once before capture so the kernels compile and
@@ -136,8 +148,9 @@ the cached scale and slice tables exist; capture and replay then work.
     n_split        column ranges per (token block, slice) = times each v is computed.
     cols_per_prog  columns owned by one program, a multiple of BN so no tile is shared.
 
-Only BM, BH, BN, R_PAD, HAS_SCALE, ADD_OUT and ZERO_FILL are tl.constexpr. T, h_in, n_max,
-r_limit and cols_per_prog are runtime arguments, so a new batch size does not recompile.
+Only block sizes, widths (R, R_PAD) and feature flags (HAS_SCALE, ADD_OUT, ZERO_FILL, ALIGNED,
+LOOP, INDEXED, RANK_SKIP, RANK_PROBE) are tl.constexpr. T, h_in, n_max, r_limit, force_rank and
+cols_per_prog are runtime arguments, so a new batch size does not recompile.
 
 =====================================================================================
 7. Assumptions
@@ -147,7 +160,9 @@ r_limit and cols_per_prog are runtime arguments, so a new batch size does not re
 * x, A_t, B contiguous and sharing one dtype (fp16, bf16, fp32) with out; token_ranks
   int32/int64.
 * Every token rank is <= r_limit. When the caller passes r_limit this is trusted, not
-  checked: a larger rank would be silently truncated to r_limit.
+  checked. A larger rank is silently truncated to r_limit in RF1; in the rank-skipping kernels
+  (rf2_fused, RANK_SKIP) a block whose maximum rank is above R_PAD matches no width and writes
+  nothing, so its rows keep whatever out held.
 * Offsets are int32, so T * h and r_max * h must stay below 2**31.
 
 =====================================================================================
@@ -188,10 +203,14 @@ stores go out one element at a time (the expand at 8192 tokens took 67 instead o
 Single projections and vLLM's fused q/k/v and gate/up layouts are all aligned.
 
 Every RF1 and RF2 variant on this path launches these same kernels through splitk_pass, so
-slices, the hint, block sizes and tile rules cannot differ between them. Two settings separate
-the variants: INDEXED (rf2_index reads tokens through a sorted index, rf2_bucketed each bucket's
-tokens through a table) and the rank width (R_PAD for RF1; a fixed bucket per launch for rf2_bucketed; with RANK_SKIP, each block's
-bucket at run time, branching to a part compiled for that width).
+slices, the hint and tile rules cannot differ between them. Launch settings (block size, warps,
+BH, stages, tiled-expand BN) come from _config for the width a launch runs at: the default rules,
+overridden by the tuned table (tuned_a100.py) on its GPU. RF1, rf2_segment and rf2_index look
+them up at the batch's width; rf2_ranges and rf2_bucketed_tuned at each bucket's. Two settings
+separate the variants: INDEXED (rf2_index reads tokens through a sorted index, rf2_bucketed each
+bucket's tokens through a table) and the rank width (R_PAD for RF1; a fixed bucket per launch
+for rf2_bucketed and rf2_ranges, which runs RF1 on each bucket's contiguous rows; with
+RANK_SKIP, each block's bucket at run time, branching to a part compiled for that width).
 rf2_segment_fw passes force_rank = r_limit, so each block takes the batch's bucket through the
 same binary: rf2_segment vs rf2_segment_fw is the effect of skipping alone, and rf2_segment_fw
 vs rf1_fused is the cost of the rank read and branch. rf2_probe_read and rf2_probe_branch split
