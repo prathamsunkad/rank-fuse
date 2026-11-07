@@ -1,0 +1,606 @@
+{
+ "main": [
+  {
+   "block_h": 32,
+   "num_stages": 1,
+   "num_warps": 2,
+   "us": 101.53599828481674
+  },
+  {
+   "block_h": 32,
+   "num_stages": 1,
+   "num_warps": 4,
+   "us": 96.6079980134964
+  },
+  {
+   "block_h": 32,
+   "num_stages": 1,
+   "num_warps": 8,
+   "us": 96.70399874448776
+  },
+  {
+   "block_h": 32,
+   "num_stages": 2,
+   "num_warps": 2,
+   "us": 93.50399672985077
+  },
+  {
+   "block_h": 32,
+   "num_stages": 2,
+   "num_warps": 4,
+   "us": 92.28800237178802
+  },
+  {
+   "block_h": 32,
+   "num_stages": 2,
+   "num_warps": 8,
+   "us": 94.81599926948547
+  },
+  {
+   "block_h": 32,
+   "num_stages": 3,
+   "num_warps": 2,
+   "us": 49.92000013589859
+  },
+  {
+   "block_h": 32,
+   "num_stages": 3,
+   "num_warps": 4,
+   "us": 50.4320003092289
+  },
+  {
+   "block_h": 32,
+   "num_stages": 3,
+   "num_warps": 8,
+   "us": 51.00800096988678
+  },
+  {
+   "block_h": 32,
+   "num_stages": 4,
+   "num_warps": 2,
+   "us": 35.80800071358681
+  },
+  {
+   "block_h": 32,
+   "num_stages": 4,
+   "num_warps": 4,
+   "us": 36.0959991812706
+  },
+  {
+   "block_h": 32,
+   "num_stages": 4,
+   "num_warps": 8,
+   "us": 36.57599911093712
+  },
+  {
+   "block_h": 64,
+   "num_stages": 1,
+   "num_warps": 2,
+   "us": 63.07200342416763
+  },
+  {
+   "block_h": 64,
+   "num_stages": 1,
+   "num_warps": 4,
+   "us": 59.13599953055382
+  },
+  {
+   "block_h": 64,
+   "num_stages": 1,
+   "num_warps": 8,
+   "us": 60.095999389886856
+  },
+  {
+   "block_h": 64,
+   "num_stages": 2,
+   "num_warps": 2,
+   "us": 55.67999929189682
+  },
+  {
+   "block_h": 64,
+   "num_stages": 2,
+   "num_warps": 4,
+   "us": 52.84800007939339
+  },
+  {
+   "block_h": 64,
+   "num_stages": 2,
+   "num_warps": 8,
+   "us": 54.75199967622757
+  },
+  {
+   "block_h": 64,
+   "num_stages": 3,
+   "num_warps": 2,
+   "us": 31.488001346588135
+  },
+  {
+   "block_h": 64,
+   "num_stages": 3,
+   "num_warps": 4,
+   "us": 30.271999537944794
+  },
+  {
+   "block_h": 64,
+   "num_stages": 3,
+   "num_warps": 8,
+   "us": 31.231999397277832
+  },
+  {
+   "block_h": 64,
+   "num_stages": 4,
+   "num_warps": 2,
+   "us": 23.64799939095974
+  },
+  {
+   "block_h": 64,
+   "num_stages": 4,
+   "num_warps": 4,
+   "us": 22.911999374628067
+  },
+  {
+   "block_h": 64,
+   "num_stages": 4,
+   "num_warps": 8,
+   "us": 23.391999304294586
+  },
+  {
+   "block_h": 128,
+   "num_stages": 1,
+   "num_warps": 2,
+   "us": 42.047999799251556
+  },
+  {
+   "block_h": 128,
+   "num_stages": 1,
+   "num_warps": 4,
+   "us": 47.968000173568726
+  },
+  {
+   "block_h": 128,
+   "num_stages": 1,
+   "num_warps": 8,
+   "us": 39.16800022125244
+  },
+  {
+   "block_h": 128,
+   "num_stages": 2,
+   "num_warps": 2,
+   "us": 37.151999771595
+  },
+  {
+   "block_h": 128,
+   "num_stages": 2,
+   "num_warps": 4,
+   "us": 33.92000123858452
+  },
+  {
+   "block_h": 128,
+   "num_stages": 2,
+   "num_warps": 8,
+   "us": 36.159999668598175
+  },
+  {
+   "block_h": 128,
+   "num_stages": 3,
+   "num_warps": 2,
+   "us": 23.072000592947006
+  },
+  {
+   "block_h": 128,
+   "num_stages": 3,
+   "num_warps": 4,
+   "us": 23.64799939095974
+  },
+  {
+   "block_h": 128,
+   "num_stages": 3,
+   "num_warps": 8,
+   "us": 22.624000906944275
+  },
+  {
+   "block_h": 128,
+   "num_stages": 4,
+   "num_warps": 2,
+   "us": 23.19999970495701
+  },
+  {
+   "block_h": 128,
+   "num_stages": 4,
+   "num_warps": 4,
+   "us": 22.304000332951546
+  },
+  {
+   "block_h": 128,
+   "num_stages": 4,
+   "num_warps": 8,
+   "us": 22.5600004196167
+  },
+  {
+   "block_h": 256,
+   "num_stages": 1,
+   "num_warps": 2,
+   "us": 37.88800165057182
+  },
+  {
+   "block_h": 256,
+   "num_stages": 1,
+   "num_warps": 4,
+   "us": 28.416000306606293
+  },
+  {
+   "block_h": 256,
+   "num_stages": 1,
+   "num_warps": 8,
+   "us": 36.80000081658363
+  },
+  {
+   "block_h": 256,
+   "num_stages": 2,
+   "num_warps": 2,
+   "us": 29.24799919128418
+  },
+  {
+   "block_h": 256,
+   "num_stages": 2,
+   "num_warps": 4,
+   "us": 25.696000084280968
+  },
+  {
+   "block_h": 256,
+   "num_stages": 2,
+   "num_warps": 8,
+   "us": 28.16000021994114
+  },
+  {
+   "block_h": 256,
+   "num_stages": 3,
+   "num_warps": 2,
+   "us": 22.784000262618065
+  },
+  {
+   "block_h": 256,
+   "num_stages": 3,
+   "num_warps": 4,
+   "us": 21.31200022995472
+  },
+  {
+   "block_h": 256,
+   "num_stages": 3,
+   "num_warps": 8,
+   "us": 22.08000048995018
+  },
+  {
+   "block_h": 256,
+   "num_stages": 4,
+   "num_warps": 2,
+   "us": 23.296000435948372
+  },
+  {
+   "block_h": 256,
+   "num_stages": 4,
+   "num_warps": 4,
+   "us": 20.576000213623047
+  },
+  {
+   "block_h": 256,
+   "num_stages": 4,
+   "num_warps": 8,
+   "us": 22.272000089287758
+  }
+ ],
+ "baselines": {
+  "32": {
+   "b1_padded": 87.96799927949905,
+   "b1_padded_graphed": 20.06400004029274,
+   "rf2_fused": 65.85600227117538,
+   "rf1_fused (default)": 52.86400020122528
+  }
+ },
+ "by_tokens": {
+  "1": {
+   "baselines": {
+    "b1_padded": 79.16799932718277,
+    "b1_padded_graphed": 18.97599920630455,
+    "rf2_fused": 47.32799902558327,
+    "rf1_fused (default)": 36.12799942493439
+   },
+   "top": [
+    {
+     "block_h": 256,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 20.70399932563305
+    },
+    {
+     "block_h": 256,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 21.407999098300934
+    },
+    {
+     "block_h": 256,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 22.112000733613968
+    },
+    {
+     "block_h": 64,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 25.567999109625816
+    },
+    {
+     "block_h": 64,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 24.73600022494793
+    },
+    {
+     "block_h": 64,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 22.23999984562397
+    },
+    {
+     "block_h": 64,
+     "num_stages": 4,
+     "num_warps": 8,
+     "us": 24.57600086927414
+    },
+    {
+     "block_h": 128,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 22.911999374628067
+    },
+    {
+     "block_h": 128,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 23.264000192284584
+    },
+    {
+     "block_h": 128,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 21.215999498963356
+    },
+    {
+     "block_h": 128,
+     "num_stages": 4,
+     "num_warps": 8,
+     "us": 22.816000506281853
+    }
+   ]
+  },
+  "8": {
+   "baselines": {
+    "b1_padded": 86.46400272846222,
+    "b1_padded_graphed": 18.783999606966972,
+    "rf2_fused": 58.43200162053108,
+    "rf1_fused (default)": 43.10400038957596
+   },
+   "top": [
+    {
+     "block_h": 256,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 20.608000457286835
+    },
+    {
+     "block_h": 256,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 19.999999552965164
+    },
+    {
+     "block_h": 256,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 21.888000890612602
+    },
+    {
+     "block_h": 64,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 25.855999439954758
+    },
+    {
+     "block_h": 64,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 28.416000306606293
+    },
+    {
+     "block_h": 64,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 23.264000192284584
+    },
+    {
+     "block_h": 64,
+     "num_stages": 4,
+     "num_warps": 8,
+     "us": 24.960000067949295
+    },
+    {
+     "block_h": 128,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 22.112000733613968
+    },
+    {
+     "block_h": 128,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 23.93599972128868
+    },
+    {
+     "block_h": 128,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 21.344000473618507
+    },
+    {
+     "block_h": 128,
+     "num_stages": 4,
+     "num_warps": 8,
+     "us": 21.056000143289566
+    }
+   ]
+  },
+  "128": {
+   "baselines": {
+    "b1_padded": 86.496002972126,
+    "b1_padded_graphed": 23.711999878287315,
+    "rf2_fused": 68.28799843788147,
+    "rf1_fused (default)": 55.904000997543335
+   },
+   "top": [
+    {
+     "block_h": 256,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 22.655999287962914
+    },
+    {
+     "block_h": 256,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 23.04000034928322
+    },
+    {
+     "block_h": 256,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 22.495999932289124
+    },
+    {
+     "block_h": 64,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 33.535998314619064
+    },
+    {
+     "block_h": 64,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 34.55999866127968
+    },
+    {
+     "block_h": 64,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 26.27200074493885
+    },
+    {
+     "block_h": 64,
+     "num_stages": 4,
+     "num_warps": 8,
+     "us": 27.008000761270523
+    },
+    {
+     "block_h": 128,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 24.831999093294144
+    },
+    {
+     "block_h": 128,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 25.407999753952026
+    },
+    {
+     "block_h": 128,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 23.520000278949738
+    },
+    {
+     "block_h": 128,
+     "num_stages": 4,
+     "num_warps": 8,
+     "us": 21.84000052511692
+    }
+   ]
+  },
+  "1024": {
+   "baselines": {
+    "b1_padded": 87.99999952316284,
+    "b1_padded_graphed": 27.807999402284622,
+    "rf2_fused": 103.04000228643417,
+    "rf1_fused (default)": 74.23999905586243
+   },
+   "top": [
+    {
+     "block_h": 256,
+     "num_stages": 4,
+     "num_warps": 4,
+     "error": "OutOfResources: out of resource: shared memory, Required: 262144, Hardware limit: 232448. Reducing block sizes or `num_stages` may help."
+    },
+    {
+     "block_h": 256,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 30.592000111937523
+    },
+    {
+     "block_h": 256,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 32.575998455286026
+    },
+    {
+     "block_h": 64,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 46.84799909591675
+    },
+    {
+     "block_h": 64,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 46.20800167322159
+    },
+    {
+     "block_h": 64,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 38.047999143600464
+    },
+    {
+     "block_h": 64,
+     "num_stages": 4,
+     "num_warps": 8,
+     "us": 37.696000188589096
+    },
+    {
+     "block_h": 128,
+     "num_stages": 3,
+     "num_warps": 4,
+     "us": 35.2960005402565
+    },
+    {
+     "block_h": 128,
+     "num_stages": 3,
+     "num_warps": 8,
+     "us": 36.67199984192848
+    },
+    {
+     "block_h": 128,
+     "num_stages": 4,
+     "num_warps": 4,
+     "us": 30.527999624609947
+    },
+    {
+     "block_h": 128,
+     "num_stages": 4,
+     "num_warps": 8,
+     "us": 31.87200054526329
+    }
+   ]
+  }
+ }
+}

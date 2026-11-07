@@ -4,7 +4,7 @@ Run before benchmarking to predict where RankFuse can win:
 
     python -m rankfuse.roofline --h 4096 --ranks 4 8 16 32 --tokens-per-request 1
 
-Modeling assumptions (keep in sync with docs/PLAN.md):
+Modeling assumptions (keep in sync with docs/ALGORITHMS.md, section 8.1):
 * y is accumulated (y += delta): output costs a read and a write of T x h_out.
 * Unfused strategies write the intermediate v [T, r] to HBM and read it back. The padded
   baseline also pays one extra read+write of v for the mask.
@@ -25,6 +25,7 @@ DTYPE_BYTES = {"fp32": 4, "fp16": 2, "bf16": 2}
 GPUS = {
     "A100-80GB": (2.039e12, 312e12),
     "A100-40GB": (1.555e12, 312e12),
+    "H200": (4.8e12, 989e12),
     "H100-SXM": (3.35e12, 989e12),
     "H100-PCIe": (2.0e12, 756e12),
     "V100": (0.9e12, 125e12),

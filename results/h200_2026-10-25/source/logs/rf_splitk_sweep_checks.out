@@ -1,0 +1,58 @@
+---------------------------------------
+Begin Slurm Prolog: Oct-23-2026 10:49:50
+Job ID:    6497903
+User ID:   psunkad3
+Account:   cse
+Job name:  rankfuse-sk-sweep
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+NVIDIA H200 | torch 2.13.0+cu130 | triton 3.7.1
+correctness: 492/492 checks match B0
+
+=== rank mix: uniform ===
+T=1     max_r=1   mean_r=  1.0 | B1g    16.2 | RF1 tuned    23.6 | RF2 def    36.0 tuned    25.2 | RF1-sK    15.3 (rf1_splitk_S16) | RF2-sK    18.3 (rf2_splitk_S16)
+T=8     max_r=16  mean_r=  5.0 | B1g    19.5 | RF1 tuned    23.8 | RF2 def    45.7 tuned    25.7 | RF1-sK    15.4 (rf1_splitk_S16) | RF2-sK    18.0 (rf2_splitk_S16)
+T=32    max_r=64  mean_r= 17.5 | B1g    22.5 | RF1 tuned    24.5 | RF2 def    52.2 tuned    26.8 | RF1-sK    15.9 (rf1_splitk_S16) | RF2-sK    18.8 (rf2_splitk_S4)
+T=128   max_r=64  mean_r= 19.4 | B1g    23.9 | RF1 tuned    24.6 | RF2 def    54.1 tuned    26.6 | RF1-sK    15.6 (rf1_splitk_S8) | RF2-sK    17.7 (rf2_splitk_S8)
+T=512   max_r=64  mean_r= 18.4 | B1g    25.1 | RF1 tuned    25.8 | RF2 def    68.8 tuned    32.3 | RF1-sK    18.6 (rf1_splitk_S8) | RF2-sK    20.8 (rf2_splitk_S8)
+T=1024  max_r=64  mean_r= 18.5 | B1g    27.5 | RF1 tuned    29.4 | RF2 def    74.7 tuned    37.8 | RF1-sK    24.7 (rf1_splitk_S4) | RF2-sK    25.7 (rf2_splitk_S4)
+T=2048  max_r=64  mean_r= 18.3 | B1g    32.8 | RF1 tuned    42.9 | RF2 def    88.4 tuned    49.5 | RF1-sK    36.5 (rf1_splitk_S4) | RF2-sK    35.6 (rf2_splitk_S4)
+T=4096  max_r=64  mean_r= 17.9 | B1g    42.0 | RF1 tuned    67.0 | RF2 def   113.2 tuned    73.1 | RF1-sK    59.9 (rf1_splitk_S4) | RF2-sK    57.7 (rf2_splitk_S4)
+T=8192  max_r=64  mean_r= 18.1 | B1g    62.4 | RF1 tuned   119.9 | RF2 def   162.1 tuned   122.3 | RF1-sK   111.7 (rf1_splitk_S2) | RF2-sK   101.7 (rf2_splitk_S2)
+
+=== rank mix: skew_low ===
+T=1     max_r=1   mean_r=  1.0 | B1g    18.8 | RF1 tuned    22.7 | RF2 def    35.7 tuned    24.8 | RF1-sK    15.4 (rf1_splitk_S8) | RF2-sK    18.5 (rf2_splitk_S16)
+T=8     max_r=8   mean_r=  2.4 | B1g    19.0 | RF1 tuned    23.3 | RF2 def    39.5 tuned    25.1 | RF1-sK    14.6 (rf1_splitk_S8) | RF2-sK    18.0 (rf2_splitk_S8)
+T=32    max_r=64  mean_r=  9.2 | B1g    23.0 | RF1 tuned    23.3 | RF2 def    53.2 tuned    25.7 | RF1-sK    14.9 (rf1_splitk_S16) | RF2-sK    18.0 (rf2_splitk_S16)
+T=128   max_r=64  mean_r= 10.6 | B1g    23.7 | RF1 tuned    25.3 | RF2 def    54.1 tuned    27.1 | RF1-sK    15.9 (rf1_splitk_S8) | RF2-sK    18.2 (rf2_splitk_S8)
+T=512   max_r=64  mean_r=  9.1 | B1g    25.5 | RF1 tuned    24.6 | RF2 def    70.4 tuned    32.4 | RF1-sK    18.7 (rf1_splitk_S8) | RF2-sK    21.2 (rf2_splitk_S4)
+T=1024  max_r=64  mean_r=  8.8 | B1g    27.7 | RF1 tuned    29.7 | RF2 def    75.7 tuned    38.3 | RF1-sK    24.6 (rf1_splitk_S8) | RF2-sK    25.8 (rf2_splitk_S4)
+T=2048  max_r=64  mean_r=  8.7 | B1g    32.7 | RF1 tuned    42.8 | RF2 def    88.5 tuned    49.6 | RF1-sK    36.9 (rf1_splitk_S4) | RF2-sK    35.7 (rf2_splitk_S4)
+T=4096  max_r=64  mean_r=  8.7 | B1g    41.9 | RF1 tuned    66.1 | RF2 def   113.5 tuned    73.2 | RF1-sK    59.6 (rf1_splitk_S4) | RF2-sK    58.0 (rf2_splitk_S4)
+T=8192  max_r=64  mean_r=  8.8 | B1g    62.5 | RF1 tuned   120.8 | RF2 def   162.9 tuned   122.0 | RF1-sK   112.1 (rf1_splitk_S2) | RF2-sK   101.8 (rf2_splitk_S2)
+
+=== rank mix: skew_high ===
+T=1     max_r=32  mean_r= 32.0 | B1g    19.4 | RF1 tuned    24.4 | RF2 def    49.3 tuned    26.0 | RF1-sK    16.9 (rf1_splitk_S4) | RF2-sK    19.6 (rf2_splitk_S4)
+T=8     max_r=32  mean_r= 13.2 | B1g    19.9 | RF1 tuned    23.6 | RF2 def    47.6 tuned    25.5 | RF1-sK    16.7 (rf1_splitk_S8) | RF2-sK    19.9 (rf2_splitk_S16)
+T=32    max_r=64  mean_r= 25.6 | B1g    23.1 | RF1 tuned    23.5 | RF2 def    52.7 tuned    25.9 | RF1-sK    15.4 (rf1_splitk_S16) | RF2-sK    18.8 (rf2_splitk_S16)
+T=128   max_r=64  mean_r= 28.0 | B1g    23.5 | RF1 tuned    25.0 | RF2 def    54.1 tuned    27.9 | RF1-sK    16.0 (rf1_splitk_S8) | RF2-sK    18.5 (rf2_splitk_S4)
+T=512   max_r=64  mean_r= 27.6 | B1g    25.3 | RF1 tuned    24.9 | RF2 def    69.1 tuned    32.2 | RF1-sK    18.8 (rf1_splitk_S8) | RF2-sK    20.8 (rf2_splitk_S4)
+T=1024  max_r=64  mean_r= 27.8 | B1g    27.7 | RF1 tuned    29.6 | RF2 def    75.1 tuned    37.8 | RF1-sK    24.8 (rf1_splitk_S8) | RF2-sK    25.7 (rf2_splitk_S4)
+T=2048  max_r=64  mean_r= 27.6 | B1g    32.8 | RF1 tuned    42.7 | RF2 def    87.1 tuned    49.5 | RF1-sK    36.8 (rf1_splitk_S4) | RF2-sK    35.9 (rf2_splitk_S4)
+T=4096  max_r=64  mean_r= 27.2 | B1g    42.1 | RF1 tuned    67.9 | RF2 def   113.9 tuned    73.3 | RF1-sK    59.8 (rf1_splitk_S4) | RF2-sK    58.3 (rf2_splitk_S4)
+T=8192  max_r=64  mean_r= 27.3 | B1g    62.4 | RF1 tuned   119.4 | RF2 def   163.1 tuned   123.2 | RF1-sK   111.8 (rf1_splitk_S2) | RF2-sK   104.4 (rf2_splitk_S2)
+
+wrote /storage/ice1/4/7/psunkad3/rankfuse/logs/rf_splitk_sweep.json
+---------------------------------------
+Begin Slurm Epilog: Oct-23-2026 10:56:08
+Job ID:        6497903
+User ID:       psunkad3
+Account:       cse
+Job name:      rankfuse-sk-sweep
+Resources:     cpu=8,gres/gpu:h200=1,mem=64G,node=1
+Rsrc Used:     cput=00:50:56,vmem=0,walltime=00:06:22,mem=2389132K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-017-23-0
+---------------------------------------

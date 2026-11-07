@@ -9,7 +9,13 @@ Two variants:
                        every call, including a host sync, the way naive serving code would.
 * b2_grouped_graphed - CUDA only. Grouping is computed once and the per-group launches are
                        captured in a CUDA graph, so launch overhead is (mostly) removed.
-                       Comparing the two isolates launch/host overhead from the matmul cost.
+                       This is a fixed-layout optimistic ablation, not a dynamic-serving path.
+
+TODO: add `b2_prepared`, which accepts groups prepared by the batch scheduler and reuses them
+across all LoRA projections/layers while that batch layout is unchanged. Groups belong to a
+batch layout, not to the model forever. Keep its computation as ordinary PyTorch: gather, two
+matmuls, and scatter for each distinct rank. A separate optional `b2_fused_groups` may replace
+each group's two matmuls with one fused kernel, but it would still launch once per rank group.
 """
 
 import torch
@@ -41,7 +47,10 @@ def grouped(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) ->
 
 # Graphs are cached per (x, lora, token_ranks) storage. The benchmark harness reuses the same
 # tensors across repetitions, so the first call captures and later calls only replay.
-_GRAPH_CACHE: dict[tuple, tuple[torch.cuda.CUDAGraph, torch.Tensor]] = {}
+# A graph replays raw device addresses, so each entry also holds every tensor the graph reads:
+# the group index tensors (otherwise freed on return and overwritten before the next replay)
+# and the inputs (otherwise a new tensor could reuse a freed address and hit a stale graph).
+_GRAPH_CACHE: dict[tuple, tuple] = {}
 
 
 @register("b2_grouped_graphed", requires_cuda=True)
@@ -59,8 +68,8 @@ def grouped_graphed(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Te
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             _grouped_compute(x, lora, groups, out)
-        _GRAPH_CACHE[key] = (graph, out)
-    graph, out = _GRAPH_CACHE[key]
+        _GRAPH_CACHE[key] = (graph, out, groups, x, lora, token_ranks)
+    graph, out = _GRAPH_CACHE[key][:2]
     graph.replay()
     return apply_scale(out, lora, token_ranks)
 

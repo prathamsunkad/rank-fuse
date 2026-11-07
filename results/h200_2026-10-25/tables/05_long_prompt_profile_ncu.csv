@@ -1,0 +1,7 @@
+tokens,implementation,kernels,kernel time us (ncu),DRAM read MB,DRAM write MB,L2 traffic MB,DRAM % peak
+2048,"B1 (PyTorch, graphed)",7,34.4,20.49,0.0,72.5,12.4
+2048,"RF1 one kernel, tuned",1,36.1,17.86,1.84,132.9,11.4
+2048,"RF1 split-K (prototype, before tiled expand)",2,30.5,19.95,0.01,75.7,13.6
+8192,"B1 (PyTorch, graphed)",6,57.6,72.05,42.87,259.8,41.5
+8192,"RF1 one kernel, tuned",1,113.1,68.23,40.31,243.9,20.0
+8192,"RF1 split-K (prototype, before tiled expand)",2,103.7,72.42,42.7,260.7,23.1

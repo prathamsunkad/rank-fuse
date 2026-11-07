@@ -1,0 +1,60 @@
+---------------------------------------
+Begin Slurm Prolog: Oct-22-2026 23:25:15
+Job ID:    6488225
+User ID:   psunkad3
+Account:   cse
+Job name:  rankfuse-splitk
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+NVIDIA H200 | torch 2.13.0+cu130 | triton 3.7.1
+correctness: 264/264 checks match B0
+
+T=1: b1_padded_graphed 16.99 us | rf1_fused default 32.06 | rf1_fused tuned 21.70 | split-K best 15.95 (S=8 BH=128 stages=3)
+   S=8   BH=128  stages=3    15.95 us
+   S=16  BH=64   stages=2    15.97 us
+   S=32  BH=64   stages=3    16.00 us
+   S=16  BH=128  stages=2    16.10 us
+   S=16  BH=64   stages=3    16.19 us
+
+T=8: b1_padded_graphed 19.14 us | rf1_fused default 41.98 | rf1_fused tuned 19.68 | split-K best 14.78 (S=16 BH=128 stages=2)
+   S=16  BH=128  stages=2    14.78 us
+   S=16  BH=64   stages=2    14.88 us
+   S=16  BH=128  stages=3    14.94 us
+   S=8   BH=64   stages=3    15.30 us
+   S=32  BH=64   stages=3    15.30 us
+
+T=32: b1_padded_graphed 21.82 us | rf1_fused default 51.58 | rf1_fused tuned 21.41 | split-K best 15.62 (S=4 BH=128 stages=3)
+   S=4   BH=128  stages=3    15.62 us
+   S=32  BH=64   stages=3    15.78 us
+   S=32  BH=128  stages=3    15.90 us
+   S=8   BH=128  stages=3    15.94 us
+   S=16  BH=128  stages=3    15.97 us
+
+T=128: b1_padded_graphed 23.87 us | rf1_fused default 55.26 | rf1_fused tuned 21.66 | split-K best 16.03 (S=8 BH=128 stages=3)
+   S=8   BH=128  stages=3    16.03 us
+   S=16  BH=64   stages=3    16.32 us
+   S=4   BH=128  stages=3    16.54 us
+   S=16  BH=128  stages=2    16.54 us
+   S=16  BH=128  stages=3    16.54 us
+
+single setting across T (split-K us):
+   S=8   BH=128  stages=3  T=1: 15.95  T=8: 15.62  T=32: 15.94  T=128: 16.03   worst vs B1 graphed: 0.94x
+   S=16  BH=64   stages=2  T=1: 15.97  T=8: 14.88  T=32: 16.77  T=128: 17.63   worst vs B1 graphed: 0.94x
+   S=32  BH=64   stages=3  T=1: 16.00  T=8: 15.30  T=32: 15.78  T=128: 17.89   worst vs B1 graphed: 0.94x
+   S=16  BH=128  stages=2  T=1: 16.10  T=8: 14.78  T=32: 16.54  T=128: 16.54   worst vs B1 graphed: 0.95x
+   S=16  BH=64   stages=3  T=1: 16.19  T=8: 15.68  T=32: 16.83  T=128: 16.32   worst vs B1 graphed: 0.95x
+
+wrote /storage/ice1/4/7/psunkad3/rankfuse/logs/rf1_splitk.json
+---------------------------------------
+Begin Slurm Epilog: Oct-22-2026 23:28:24
+Job ID:        6488225
+User ID:       psunkad3
+Account:       cse
+Job name:      rankfuse-splitk
+Resources:     cpu=8,gres/gpu:h200=1,mem=64G,node=1
+Rsrc Used:     cput=00:25:20,vmem=0,walltime=00:03:10,mem=1931340K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-018-2-0
+---------------------------------------

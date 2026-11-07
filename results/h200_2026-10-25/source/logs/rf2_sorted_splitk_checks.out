@@ -1,0 +1,70 @@
+---------------------------------------
+Begin Slurm Prolog: Oct-25-2026 08:59:52
+Job ID:    6581266
+User ID:   psunkad3
+Account:   cse
+Job name:  rankfuse-rf2-v2
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+NVIDIA H200 | torch 2.13.0+cu130 | triton 3.7.1
+correctness: 82/82 checks match B0
+
+=== decode batches (us per call; RF2 times exclude the rank sort, shown apart) ===
+requests x tokens mix        max/mean r      B1  RF1 sK RF2 repo  RF2 sK  sort RF2sK/RF1sK
+1 x 1             uniform           1/1    12.4     5.9     21.7     6.2   6.7       1.05x
+1 x 1             skew_low          1/1    13.2     5.9     21.8     6.4   6.8       1.09x
+1 x 1             skew_high       32/32    13.8     6.0     23.6     6.8   6.4       1.13x
+8 x 1             uniform          16/5    14.4     5.5     22.7     6.4   9.1       1.15x
+8 x 1             skew_low          8/2    14.1     5.5     22.5     6.2   9.5       1.12x
+8 x 1             skew_high       32/13    14.6     6.1     22.8     6.8   9.2       1.11x
+32 x 1            uniform         64/18    17.1     7.5     25.2     7.8  10.0       1.04x
+32 x 1            skew_low         64/9    16.7     7.6     25.3     7.7   9.8       1.00x
+32 x 1            skew_high       64/26    16.8     7.4     25.2     8.0   9.8       1.07x
+128 x 1           uniform         64/19    17.8     8.4     26.9     8.8  10.4       1.05x
+128 x 1           skew_low        64/11    18.0     8.1     27.1     8.3  10.9       1.02x
+128 x 1           skew_high       64/28    17.6     8.4     27.2     8.5  10.8       1.02x
+
+=== large decode-format batches (us per call; RF2 times exclude the rank sort, shown apart) ===
+requests x tokens mix        max/mean r      B1  RF1 sK RF2 repo  RF2 sK  sort RF2sK/RF1sK
+512 x 1           uniform         64/18    19.2    12.3     40.9    13.0  21.3       1.06x
+512 x 1           skew_low         64/9    19.7    12.0     40.8    13.2  21.7       1.10x
+2048 x 1          uniform         64/18    25.6    19.5     76.5    18.7  22.3       0.96x
+2048 x 1          skew_low         64/9    26.4    20.0     78.8    18.8  22.2       0.94x
+8192 x 1          uniform         64/18    60.9    61.5    165.3    59.8  45.6       0.97x
+8192 x 1          skew_low         64/9    61.1    61.5    163.9    58.0  45.5       0.94x
+
+=== realistic prefill batches (one rank per request) (us per call; RF2 times exclude the rank sort, shown apart) ===
+requests x tokens mix        max/mean r      B1  RF1 sK RF2 repo  RF2 sK  sort RF2sK/RF1sK
+1 x 2048          uniform           1/1    32.5    13.3     62.7    14.5  22.1       1.09x
+1 x 2048          skew_low          1/1    33.4    13.6     62.7    14.5  22.2       1.06x
+1 x 2048          skew_high       32/32    25.1    15.7     69.9    16.6  22.0       1.06x
+4 x 512           uniform           2/2    33.1    13.5     63.0    14.9  22.1       1.11x
+4 x 512           skew_low          1/1    32.2    13.6     63.0    14.5  22.3       1.07x
+4 x 512           skew_high         8/6    27.2    13.8     64.2    15.2  21.9       1.10x
+16 x 128          uniform          32/7    25.9    15.5     67.5    16.0  22.1       1.03x
+16 x 128          skew_low          8/3    27.3    14.3     64.3    15.1  22.1       1.06x
+16 x 128          skew_high       32/14    25.6    15.7     68.1    16.2  22.2       1.03x
+4 x 2048          uniform           2/2    87.5    49.1    130.1    53.5  45.0       1.09x
+4 x 2048          skew_low          1/1    90.9    48.8    125.4    53.6  45.0       1.10x
+4 x 2048          skew_high         8/6    66.4    49.8    136.2    53.5  45.2       1.07x
+8 x 1024          uniform          16/5    63.3    50.0    140.0    54.2  45.0       1.08x
+8 x 1024          skew_low          8/2    66.1    49.8    136.6    53.4  45.5       1.07x
+8 x 1024          skew_high       32/13    62.9    53.7    144.0    55.5  45.6       1.04x
+16 x 512          uniform          32/7    62.9    53.7    145.5    54.8  46.1       1.02x
+16 x 512          skew_low          8/3    65.3    49.8    136.5    53.8  45.7       1.08x
+16 x 512          skew_high       32/14    62.9    53.7    143.7    55.3  46.3       1.03x
+
+wrote /storage/ice1/4/7/psunkad3/rankfuse/logs/rf2_splitk_v2.json
+---------------------------------------
+Begin Slurm Epilog: Oct-25-2026 09:02:56
+Job ID:        6581266
+User ID:       psunkad3
+Account:       cse
+Job name:      rankfuse-rf2-v2
+Resources:     cpu=8,gres/gpu:h200=1,mem=64G,node=1
+Rsrc Used:     cput=00:24:32,vmem=0,walltime=00:03:04,mem=2213212K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-017-2-0
+---------------------------------------
