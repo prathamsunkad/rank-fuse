@@ -35,6 +35,7 @@ where the rank order comes from and how `W_b` is chosen:
 | `rf2_segment` | `x` and ranks in memory order; **no list**. Assumes the scheduler already put requests in rank order in memory | Next BM consecutive rows | Reads the block's ranks in the kernel, takes the max, branches to the matching compiled width |
 | `rf2_index` | `x` and ranks in batch order, **plus a sorted index list** | Next BM entries of the list; looks up each token's row, writes the result back to that row | Same run-time read and branch as segment |
 | `rf2_bucketed` | `x`, ranks, and a CPU plan (**one index list per bucket**) | Separate launch per bucket over that bucket's list | Fixed per launch at compile time, so no read or branch |
+| `rf2_ranges` | Physically sorted `x` and ranks, and a CPU plan (**one row range per bucket**) | Separate launch per bucket over that bucket's contiguous rows | Fixed per launch at compile time, so no read or branch |
 
 With sorted input, `rf2_segment` and `rf2_index` form the same blocks at the same widths.
 `rf2_segment` gets the order for free from the memory layout; `rf2_index` pays one index load per
@@ -51,6 +52,17 @@ Example, ranks `[8, 200, 8, 8, 8, 8, 8, 200]`, BM = 4 (real blocks are 16–64 t
 | `rf2_segment`, physically sorted | `[8,8,8,8]`, `[8,8,200,200]` | 16, 256 |
 | `rf2_index`, sorted list | positions 0,2,3,4 then 5,6,1,7 | 16, 256 |
 | `rf2_bucketed` | bucket 16: six tokens; bucket 256: two tokens | 16, 256 (two launches) |
+| `rf2_ranges`, physically sorted | rows 0–5 at width 16, rows 6–7 at width 256 | 16, 256 (two launches) |
+
+### Why per-bucket launches
+On a sorted batch, sorting by rank also sorts by bucket, so each bucket is already one contiguous
+run of rows; the breakpoints come from counting tokens per bucket. `rf2_segment` sees nearly the
+same groups, but runs them all in one kernel compiled with five width arms, choosing a width per
+block at run time, with the block size set by the batch's width. `rf2_ranges` instead runs
+`rf1_fused`'s split-K pass once per run, on the row views `x[start:end]`, `out[start:end]`, at
+exactly that bucket's width and with that width's launch settings. Each bucket is a plain RF1 call
+on its own rows: no index list, no rank read, no branch, no unused arms. On unsorted input a bucket
+spans several runs, so the plan falls back to one launch at the batch's width, which is `rf1_fused`.
 
 Each RF2 kernel has a `_fw` control that runs the same binary with every block forced to the
 batch's width, so `kernel` vs `kernel_fw` is the effect of skipping alone.
@@ -79,6 +91,7 @@ RF1 and every split-K RF2 variant launch the same two kernels through `splitk_pa
 | `rf2_segment` | Block's max rank, chosen at run time | Batch order | Shrink rank read, max, branch over up to 5 compiled widths; zero fill for rank-0 blocks in write mode | 1 pair |
 | `rf2_index` | Same as segment | Through the sorted index, result written to each token's row | Same as segment, plus one index load per row; argsort once per step | 1 pair |
 | `rf2_bucketed` | One compiled width per launch | Through each bucket's index | None at run time; CPU plan per step | 1 pair per bucket, on concurrent streams |
+| `rf2_ranges` | One compiled width per launch | Batch order, one contiguous range per bucket | None at run time; CPU plan per step | 1 pair per bucket, on concurrent streams |
 
 ### Asymmetries to keep in mind
 1. **Narrow blocks inherit the batch's block size (works against RF2).**
@@ -111,6 +124,30 @@ RF1 and every split-K RF2 variant launch the same two kernels through `splitk_pa
 3. **RF1 was tuned at r_max 64 only (works for RF2).** Going from r_max 128 to 256 costs RF1
    2.7–3.1×, not 2×, so part of any r_max 256 win could be RF1 being slow. Every skew result is
    also compared with `b1_padded`.
+
+## Per-width launch settings (tuning)
+Block size, warps and tile settings are looked up per **(width, token count range)** in one table,
+`rankfuse_fused._config`, filled from `rankfuse/kernels/tuned_a100.py` on the GPU it was tuned on
+(`RANKFUSE_TUNED=0` turns it off for before/after runs). `bench/tune_blocks.py` builds it:
+
+* **Inputs:** single-rank batches (every token at width W) at 256, 1024, 2048 and 8192 tokens,
+  4096 × 4096 fp16, add mode, graph timing. These batches are tuning inputs only, never results.
+* **Search:** BM (16–128) × shrink warps × expand tile × expand warps, then shrink chunk × pipeline
+  stages at the best of those. Combinations holding `v [BM, W]` above 64 KiB of fp32 registers
+  are skipped. Up to 128 tokens (decode, loop expand) keeps the default rules.
+* **Choice:** per range, the per-size winners and the default are re-timed on every size in the
+  range over 3 seeds; the best geometric mean replaces the default only if it is more than 2%
+  faster (the repeat noise).
+
+Every kernel uses the same table; only the width it looks up differs. `rf1_fused`, `rf2_segment`
+and `rf2_index` run one launch, so they use the batch's width. `rf2_bucketed_tuned` and
+`rf2_ranges` launch per bucket, so they use each bucket's width. `rf2_bucketed` uses the batch's
+width, as the "RF1 settings" control.
+
+**Parity rule:** RF1 gets every optimization that doesn't depend on running blocks at different
+widths. Tuned block sizes, warps and tiles are shared through the table. Only per-bucket block
+sizes, concurrent streams across buckets, the host bucket plan and the run-time rank read and
+branch are RF2-only, because they only exist when a batch runs at more than one width.
 
 ## Two scheduler assumptions
 | Assumption | What the scheduler provides | Kernel | Benchmark input | Cost reported separately |
@@ -145,9 +182,11 @@ Share of requests per width bucket for the r_max 256 mixes (nine pow2 tiers, 1 t
 | `low_frac_90/99/100` | 90% / 99% / all but one | – | – | – | rest |
 
 ## Future work
-* **Block size for narrow blocks (asymmetry 1).** Two possible fixes: in one launch, pick BM for
-  narrow blocks and let wider arms walk their tokens in smaller row chunks; or launch per bucket
-  with its own BM, as `rf2_bucketed_tuned` does. Decide after `rf2_skew` measures the cost.
+* **Block size for narrow blocks (asymmetry 1).** `rf2_ranges` and `rf2_bucketed_tuned` fix it by
+  launching per bucket with that width's settings. Still open for the one-launch kernels: pick BM
+  for narrow blocks and let wider arms walk their tokens in smaller row chunks.
+* **Device-side bucket ranges** for `rf2_ranges` under CUDA graphs in serving, where the bucket
+  sizes change every step: offsets on the GPU, worst-case grids, early exit.
 * **Compile only the widths a batch needs (asymmetry 2)**, if the skew results show narrow blocks
   paying for unused arms.
 * **Scheduler support:** check whether vLLM can provide a rank-sorted index or rank-ordered requests.
