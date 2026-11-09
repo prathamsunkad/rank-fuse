@@ -778,12 +778,15 @@ def _config(width: int, num_tokens: int, device_index: int = 0, bm: int | None =
     """Launch settings for one group of num_tokens tokens at `width` rank rows.
 
     Keys: bm (tokens per program), shrink_warps, bh and stages (None: the shrink-tile rule),
-    bn and expand_warps for the tiled expand (None: EXPAND_TILED_BLOCK_N / _WARPS). bm and bn
-    are the caller's defaults when there is no tuned entry (None: _block_m and the module rule)."""
+    bn and expand_warps for the tiled expand (None: EXPAND_TILED_BLOCK_N / _WARPS), loop_expand
+    (True: the column-loop expand even above EXPAND_TILED_MIN_TOKENS). bm and bn are the caller's
+    defaults when there is no tuned entry (None: _block_m and the module rule). Derived key: tiled,
+    whether the expand runs one tile per program (above EXPAND_TILED_MIN_TOKENS, unless loop_expand)."""
     cfg = dict(bm=_block_m(num_tokens, width) if bm is None else bm, shrink_warps=4, bh=None, stages=None,
-               bn=bn, expand_warps=None)
+               bn=bn, expand_warps=None, loop_expand=False)
     if TUNED and _gpu_name(device_index) == TUNED_GPU:
         cfg.update(TUNED.get((width, _token_range(num_tokens)), {}))
+    cfg["tiled"] = num_tokens > EXPAND_TILED_MIN_TOKENS and not cfg["loop_expand"]
     return cfg
 
 
@@ -828,7 +831,7 @@ def _split_count(h_in: int, tiled: bool, grid_tiles: int, n_slices: int, num_sms
 
 def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, block_m, bh, stages,
                 *, index=None, count=None, ws_row0=0, grid_tiles=None, rank=None, rank_skip=False, rank_probe=0, force_rank=0, block_n=None,
-                shrink_warps=4, expand_warps=None):
+                shrink_warps=4, expand_warps=None, tiled=None):
     """Launch the two split-K kernels for one group of tokens; every RF1 and RF2 variant comes here.
 
     Tokens: the batch in order (index None), or index[:count] through a lookup, with partials in
@@ -837,7 +840,8 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
     width and adds part of the rank-skipping path, to measure it: 1 the rank read, 2 also one
     branch. grid_tiles is the token
     block count across all groups launched together; block_n and expand_warps override the tiled
-    expand's tile and warps, shrink_warps the shrink's warps (from _config).
+    expand's tile and warps, shrink_warps the shrink's warps, tiled the expand mode (None: tiled
+    above EXPAND_TILED_MIN_TOKENS; all from _config).
     """
     num_tokens, h_in = x.shape
     n_slices, r_max, _ = A_t.shape
@@ -859,7 +863,8 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
     # When there is no scale, out stands in for the unused table pointer.
     scales = out if scale_table is None else scale_table
     aligned = USE_ALIGNED_HINT and all(s % 16 == 0 for s in sizes)
-    tiled = num_tokens > EXPAND_TILED_MIN_TOKENS
+    if tiled is None:
+        tiled = num_tokens > EXPAND_TILED_MIN_TOKENS
     if tiled:
         # One tile per program; narrow the tile while B's [R_PAD, BN] tile would take more
         # than ~35% of shared memory (fp32, r_max 128-256, smaller GPUs).
@@ -894,12 +899,13 @@ def _splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table
     block_m = cfg["bm"]
     m_tiles = triton.cdiv(num_tokens, block_m)
     bh, stages = _splitk_shrink_tiles(block_m, r_pad, x.element_size(), device_index, cfg["bh"], cfg["stages"])
-    tiled = num_tokens > EXPAND_TILED_MIN_TOKENS
+    tiled = cfg["tiled"]
     split_k, k_per = _split_count(h_in, tiled, m_tiles, n_slices, _num_sms(device_index), bh, split_k)
     ws = torch.empty((n_slices, split_k, num_tokens, r_pad), dtype=torch.float32, device=x.device)
     return splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, block_m, bh, stages,
                        index=index, rank_skip=rank_skip, rank_probe=rank_probe, force_rank=force_rank,
-                       block_n=cfg["bn"], shrink_warps=cfg["shrink_warps"], expand_warps=cfg["expand_warps"])
+                       block_n=cfg["bn"], shrink_warps=cfg["shrink_warps"], expand_warps=cfg["expand_warps"],
+                       tiled=tiled)
 
 
 def rankfuse_lora(

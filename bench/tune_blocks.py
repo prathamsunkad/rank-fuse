@@ -8,7 +8,8 @@ up in the table (rankfuse_fused._config): RF1, rf2_segment and rf2_index at the 
 per-bucket kernels at each bucket's width, so RF1 gets every tuned setting RF2 does.
 
 Search, per width and token count (h 4096 x 4096, fp16, add mode, graph timing, L2 flushed):
-  1. BM x shrink warps x tiled-expand tile BN x expand warps, at the default shrink tiles.
+  1. BM x shrink warps x expand mode (tiled, or the column loop) x tiled-expand tile BN x expand
+     warps, at the default shrink tiles.
   2. Shrink BH x pipeline stages, at the best of step 1.
 Then for each token range the per-size winners and the default are re-timed on every size in the
 range over 3 seeds; the best geometric mean is kept only if it beats the default by more than 2%
@@ -36,7 +37,7 @@ from rankfuse.workloads import Workload, make_batch, make_lora  # noqa: E402
 
 WIDTHS = [16, 32, 64, 128, 256]
 SIZES = [256, 1024, 2048, 8192]
-STEP1 = dict(bm=[16, 32, 64, 128], shrink_warps=[4, 8], bn=[128, 256], expand_warps=[4, 8])
+STEP1 = dict(bm=[16, 32, 64, 128], shrink_warps=[4, 8], loop_expand=[False, True], bn=[128, 256], expand_warps=[4, 8])
 STEP2 = dict(bh=[64, 128], stages=[2, 3, 4])
 MAX_V_ELEMS = 64 * 1024 // 4
 KEEP_DEFAULT_WITHIN = 0.02
@@ -44,7 +45,7 @@ KEEP_DEFAULT_WITHIN = 0.02
 
 def default_cfg(width: int, tokens: int) -> dict:
     return dict(bm=rf._block_m(tokens, width), shrink_warps=4, bn=rf.EXPAND_TILED_BLOCK_N,
-                expand_warps=rf.EXPAND_TILED_WARPS, bh=rf.SPLITK_BLOCK_H, stages=rf.SPLITK_STAGES)
+                expand_warps=rf.EXPAND_TILED_WARPS, loop_expand=False, bh=rf.SPLITK_BLOCK_H, stages=rf.SPLITK_STAGES)
 
 
 class Bench:
@@ -90,6 +91,8 @@ def search(b: Bench, width: int, tokens: int) -> dict:
         cfg = dict(base, **dict(zip(STEP1, combo)))
         if cfg["bm"] * width > MAX_V_ELEMS:
             continue
+        if cfg["loop_expand"] and (cfg["bn"], cfg["expand_warps"]) != (base["bn"], base["expand_warps"]):
+            continue  # bn and expand_warps only apply to the tiled expand
         us = b.time(width, tokens, 0, cfg, "step1")
         if us is not None and (best_us is None or us < best_us):
             best, best_us = cfg, us
