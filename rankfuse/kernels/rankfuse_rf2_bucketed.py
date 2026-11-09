@@ -98,7 +98,6 @@ def rf2_bucketed(x, A_t, B, token_ranks, plan: Plan, out=None, add=False, scale_
     r_limit = plan.r_limit
     r_pad = max(16, triton.next_power_of_2(r_limit))
     dev = x.device.index or 0
-    tiled = T > rf.EXPAND_TILED_MIN_TOKENS
     # (R, idx, count, BM, BH, stages, cfg): rf1_fused's settings at the batch width, or each
     # bucket's own when tuned (rf._config at R; the hand table in block_m when nothing is tuned).
     groups = []
@@ -112,13 +111,15 @@ def rf2_bucketed(x, A_t, B, token_ranks, plan: Plan, out=None, add=False, scale_
         groups.append((R, idx, count, bm, bh, stages, cfg))
     grid_tiles = sum(triton.cdiv(g[2], g[3]) for g in groups)
     bh_min = min(g[4] for g in groups)
+    tiled = any(g[6]["tiled"] for g in groups)  # one split count for all groups: tiled's minimum if any is tiled
     split_k, k_per = rf._split_count(h_in, tiled, grid_tiles, n_slices, rf._num_sms(dev), bh_min)  # k_per: a multiple of bh_min
     ws = torch.empty((n_slices, split_k, T, r_pad), dtype=torch.float32, device=x.device)
 
     def launch(R, idx, count, bm, bh, stages, cfg, ws_row0):
         rf.splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, bm,
                        bh if k_per % bh == 0 else bh_min, stages, index=idx, count=count, ws_row0=ws_row0, grid_tiles=grid_tiles,
-                       rank=R, block_n=cfg["bn"], shrink_warps=cfg["shrink_warps"], expand_warps=cfg["expand_warps"])
+                       rank=R, block_n=cfg["bn"], shrink_warps=cfg["shrink_warps"], expand_warps=cfg["expand_warps"],
+                       tiled=cfg["tiled"])
 
     ws_row0 = 0  # each bucket takes its own workspace rows, in its own order
     if concurrent and len(groups) > 1:

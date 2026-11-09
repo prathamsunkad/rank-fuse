@@ -418,3 +418,24 @@ def test_rf2_ranges_sorted_graph_capture():
     graph.replay()
     torch.cuda.synchronize()
     _assert_close(out, REGISTRY["b0_reference"](x, lora, token_ranks), torch.float32)
+
+
+@pytest.mark.parametrize("name", ["rf1_fused", "rf2_segment", "rf2_index", "rf2_ranges", "rf2_bucketed", "rf2_bucketed_tuned"])
+@pytest.mark.parametrize("loop_expand", [False, True])
+def test_tuned_table_entries(monkeypatch, name, loop_expand):
+    """A table entry for every width (tiled or loop expand, non-default warps and tiles) is applied
+    and still matches B0, on a sorted mixed-rank prefill batch in add mode."""
+    from rankfuse.kernels import rankfuse_fused as rf
+
+    T = 300
+    entry = dict(bm=32, shrink_warps=8, bh=64, stages=2, bn=128, expand_warps=4, loop_expand=loop_expand)
+    table = {(w, rf._token_range(T)): entry for w in (16, 32, 64, 128, 256)}
+    monkeypatch.setattr(rf, "TUNED", table)
+    monkeypatch.setattr(rf, "TUNED_GPU", torch.cuda.get_device_name(0))
+    assert rf._config(256, T)["tiled"] is (not loop_expand)
+    ranks = sorted([0, 3, 20, 50, 100, 200][i % 6] for i in range(T))
+    x, lora, token_ranks = _rf2_lora(T, 256, 192, 200, torch.float16, seed=23, ranks=ranks)
+    out = torch.randn(T, 192, device="cuda", dtype=torch.float16)
+    expected = REGISTRY["b0_reference"](x, lora, token_ranks).float() + out.float()
+    REGISTRY[name](x, lora, token_ranks, out=out, add=True)
+    _assert_close(out, expected, torch.float16)
