@@ -9,7 +9,7 @@ Start here.
 | [h200_2026-10-25/](h200_2026-10-25/README.md) | H200 tables: RF1 design steps, RF1 vs B1 and vLLM (B3), whole-model and vLLM step time, first RF2 versions |
 | [a100_2026-10-26/](a100_2026-10-26/ALL_ROWS.md) | A100 sweeps at r_max 64 and 128, and the H200 shapes replayed |
 | [a100_2026-11-05/](a100_2026-11-05/SUMMARY.md) | RF2 on controlled mixes at r_max 64/128/256, overhead, the two assumptions, kernel diagnostics |
-| [a100_2026-11-06/](a100_2026-11-06/SUMMARY.md) | After per-width tuning: `rf2_ranges`, tables by r_max, RF1 ablation |
+| [a100_2026-11-06/](a100_2026-11-06/SUMMARY.md) | After per-width tuning: `rf2_ranges`, tables by r_max (`BY_RMAX.md`, with speedups), raw µs (`RAW.md`, `raw_medians.csv`), RF1 ablation |
 | `slides/` | H200 tables formatted for slides |
 | `raw/` | Raw sweep CSVs (not in git) |
 

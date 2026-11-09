@@ -3,7 +3,9 @@
 Commit 12bf0f6 (first tuned table, `rankfuse/kernels/tuned_a100.py`), add mode, CUDA-graph timing,
 3 seeds, 4096 × 4096 fp16. Jobs 15253899 (2270 tests passed with the table on, then the
 `rf2_ideal_bound`, `rf2_ideal` and `rf2_skew` sweeps) and 15253901 (RF1 ablation). Raw data:
-`results/raw/rf2_tuned/` in the frozen worktree. Full tables: `BY_RMAX.md`; ablation: `RF1_ABLATION.md`.
+`results/raw/rf2_tuned/` in the frozen worktree. Full tables with speedups: `BY_RMAX.md`;
+every median in µs, one row per workload: `RAW.md`, and the same as a CSV for analysis by hand:
+`raw_medians.csv`; ablation: `RF1_ABLATION.md`.
 Single-rank batches (`all_max`, `all_min`) are not counted. Geomeans over mixes and batch sizes.
 
 Not final: a retune that adds loop-vs-tiled expand (commit f65d09a, job 15336639) may change
