@@ -1,44 +1,44 @@
 """RankFuse Triton kernels.
 
-Each kernel module registers its wrappers with `rankfuse.interface.register`, so
-tests/test_correctness.py and bench/run_sweep.py pick them up automatically.
+* rankfuse_mask.py   - v1. Rank-aware shrink + expand; columns beyond each token's rank are
+                       masked, and rank tiles beyond a token tile's max rank exit early.
+* rankfuse_ragged.py - v2 (not started). Host builds a list of only the valid
+                       (token tile, rank tile) work items and launches exactly those. Sorting
+                       tokens by rank inside the batch makes tiles uniform.
 
-Shared split-K base. rankfuse_fused.py holds the two kernels every current RF1 and RF2 variant
-launches (`splitk_pass`, section 8 of its docstring): a split-K shrink into an fp32 workspace, then
-one expand that sums the partials, masks each token to its rank, scales and writes or adds the
-output. Launch settings come from `_config`: the default rules, overridden per (width, token range)
-by rankfuse/kernels/tuned_a100.py on the GPU it was tuned on (RANKFUSE_TUNED=0 turns that off).
-The variants differ only in how tokens are read and how wide each group runs:
+Each kernel module registers its wrapper with `rankfuse.interface.register`, so
+tests/test_correctness.py and bench/run_sweep.py pick it up automatically.
 
-* rankfuse_fused.py        - rf1_fused: RF1, every token padded to the batch's width and masked
-                             back to its own rank. The fusion control against B1.
-* rankfuse_rf2_segment.py  - rf2_segment: per-block rank buckets over the batch's own order, chosen
-                             at run time in the kernel. The main RF2, on rank-sorted batches.
-                             rf2_segment_fw is its full-width control; rf2_probe_read and
-                             rf2_probe_branch split the cost of the rank read and branch.
-* rankfuse_rf2_index.py    - rf2_index: the same buckets over a sorted index list, tokens left in
-                             batch order, and rf2_index_fw. For the sorted-index assumption.
-* rankfuse_rf2_bucketed.py - rf2_bucketed: one launch per rank bucket through that bucket's index,
-                             on concurrent streams, from a per-step CPU plan; rf2_bucketed_tuned
-                             with per-bucket launch settings; rf2_bucketed_seq without streams.
-* rankfuse_rf2_ranges.py   - rf2_ranges: on rank-sorted rows, one RF1 call per bucket over that
-                             bucket's contiguous rows, at its own width and launch settings;
-                             rf2_ranges_seq without streams.
+* rankfuse_mask.py   - RF1, the fusion control. Fuse shrink + mask + expand in Triton, loop to
+                       the batch maximum rank, and mask columns >= each token's rank.
+                       Keep v on chip. This is intentionally a fused padded/masked strategy;
+                       compare B1 vs RF1 to measure fusion and intermediate-traffic savings.
+* rankfuse_fused.py  - rf1_fused and rf2_fused. Same math as rankfuse_mask.py / rankfuse_ragged.py,
+                       but each program computes v once and reuses it across a range of
+                       output column tiles, so the shrink is not repeated per column tile.
+                       rf2_fused sorts tokens by rank and runs each block at its own rank
+                       bucket. Runtime T/r_limit (no per-batch recompiles), one host sync or
+                       none. `rankfuse_lora` adds the serving options: add into an existing
+                       output, several output slices per launch, CUDA-graph capture.
+* rankfuse_ragged.py - RF2, the rank-aware experiment. Sort token indices by rank, then let
+                       each token tile loop only to its local maximum band. Each output element
+                       is computed and written by one program, so programs do not race to
+                       update the same result and need no atomic additions.
+                       Compare RF1 vs RF2 to measure the benefit of skipping high-rank bands.
+* rankfuse_rf2_splitk.py   - rf2_splitk: rf1_fused's split-K design over a stable rank sort, each
+                             token block at its own rank bucket. Ablation: the sort costs about
+                             what the skipping saves.
+* rankfuse_rf2_segment.py  - rf2_segment: the same per-block buckets over blocks of consecutive
+                             tokens (a block table, no sort); contiguous loads and stores.
+* rankfuse_rf2_bucketed.py - rf2_bucketed: one kernel pair compiled per rank bucket, launched on
+                             concurrent streams from a per-step CPU plan; `use_rf2` picks it over
+                             rf1_fused only where it measured faster (large prompts, mixed ranks).
 
-Earlier kernels, kept as ablations (not on the shared base):
+Next TODOs: accept a scheduler-prepared rank order so RF2 can reuse it across layers, autotune
+tile sizes, and profile actual DRAM/L2 traffic. Rank sorting aims to improve prefix reuse; it
+cannot guarantee that a weight is physically loaded exactly once because output tiling and
+caches determine the real loads.
 
-* rankfuse_fused.py  - rf1_single and rf2_fused: the one-kernel path (sections 3-4), each program
-                       computing v once and reusing it across its output columns. rf1_single is the
-                       fusion ablation for rf1_fused's split-K path.
-* rankfuse_mask.py   - rf1_masked: the first RF1, one kernel whose programs each own a single
-                       output tile, so every column tile recomputes the shrink.
-* rankfuse_ragged.py - rf2_ragged: the first RF2, rf1_masked's layout over a rank-sorted order,
-                       each token tile stopping after its own last 16-row rank band.
-
-Next TODOs: profile actual DRAM/L2 traffic, and check whether a serving engine (vLLM) can supply
-rank-sorted batches or a rank-sorted index. Rank sorting aims to improve prefix reuse; it cannot
-guarantee that a weight is physically loaded exactly once because output tiling and caches
-determine the real loads.
 
 Triton is only imported when installed (it is unavailable on Windows/CPU-only machines), so
 `import rankfuse` keeps working there and the kernels are simply absent from the registry.
@@ -48,6 +48,5 @@ from importlib.util import find_spec
 
 if find_spec("triton") is not None:
     from rankfuse.kernels import rankfuse_fused, rankfuse_mask, rankfuse_ragged  # noqa: F401
-    from rankfuse.kernels import rankfuse_rf2_bucketed, rankfuse_rf2_index, rankfuse_rf2_segment  # noqa: F401
-    from rankfuse.kernels import rankfuse_rf2_ranges  # noqa: F401
+    from rankfuse.kernels import rankfuse_rf2_bucketed, rankfuse_rf2_segment, rankfuse_rf2_splitk  # noqa: F401
 

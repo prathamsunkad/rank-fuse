@@ -1,6 +1,7 @@
 """Run one registered implementation 3 times on one workload, for Nsight Compute to profile.
 
     python bench/ncu_driver.py <impl> [requests tokens_per_request h_in h_out r_max dist dtype]
+    python bench/ncu_driver.py <impl> ... --profile-sort
     # defaults: 32 1 4096 4096 64 uniform fp16
 
 The implementation's per-step metadata (`prepare`: batch maximum rank, rank order, block table,
@@ -8,9 +9,13 @@ B3's padded copies and vLLM metadata, ...) is built before the calls, so the pro
 no host sync and launches only its own kernels. The first two calls compile and warm up; the
 last sits between cudaProfilerStart/Stop, so with `ncu --profile-from-start off` (as in
 scripts/ice/ncu_profile.sh) only that call is profiled, whatever kernels cuBLAS picks.
+`--profile-sort` profiles only the stable ``torch.argsort`` used by RF2.  It deliberately
+does not call the registered implementation, so the resulting Nsight report is the sort
+component rather than a kernel report.
 """
 
 import sys
+import argparse
 from pathlib import Path
 
 import torch
@@ -22,13 +27,30 @@ from rankfuse.workloads import Workload, make_batch, make_lora  # noqa: E402
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("impl")
+    p.add_argument("workload", nargs="*", help="requests tokens_per_request h_in h_out r_max dist dtype")
+    p.add_argument("--profile-sort", action="store_true", help="profile only RF2's stable argsort")
+    ns = p.parse_args()
+    if not ns.impl:
         sys.exit(__doc__)
-    name = sys.argv[1]
+    name = ns.impl
     defaults = ["32", "1", "4096", "4096", "64", "uniform", "fp16"]
-    a = sys.argv[2:] + defaults[len(sys.argv) - 2:]
+    a = ns.workload + defaults[len(ns.workload):]
     w = Workload(int(a[0]), int(a[1]), h_in=int(a[2]), h_out=int(a[3]), r_max=int(a[4]), dist=a[5], dtype=a[6], seed=0)
     lora, batch = make_lora(w, "cuda"), make_batch(w, "cuda")
+    if ns.profile_sort:
+        if name not in {"rf2_fused", "rf2_splitk"}:
+            raise SystemExit("--profile-sort is only valid for an RF2 implementation")
+        for _ in range(2):
+            torch.argsort(batch.token_ranks, stable=True)
+        torch.cuda.synchronize()
+        torch.cuda.cudart().cudaProfilerStart()
+        torch.argsort(batch.token_ranks, stable=True)
+        torch.cuda.synchronize()
+        torch.cuda.cudart().cudaProfilerStop()
+        print(f"{name}: stable argsort only, {w.num_tokens} tokens, r_max {w.r_max}, {w.dist}", flush=True)
+        return
     impl = REGISTRY[name]
     args = (batch.x, lora, batch.token_ranks)
     kwargs = impl.prepare(*args) if impl.prepare else {}

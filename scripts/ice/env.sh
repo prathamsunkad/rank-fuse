@@ -35,3 +35,9 @@ eval "$(conda shell.bash hook)"
 if [ -d "$RF_ENV" ]; then
     conda activate "$RF_ENV"
 fi
+# The full vLLM environment can exceed login-node memory while pip resolves CUDA
+# wheels.  ICE's compute nodes provide a matching PyTorch/Triton module as a
+# fallback for the kernel and profiling jobs.
+if ! python -c "import torch, triton" >/dev/null 2>&1; then
+    module load pytorch/25.10
+fi

@@ -21,25 +21,14 @@ def _prepare_r_b(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tenso
 
 
 @register("b1_padded", prepare=_prepare_r_b)
-def padded(
-    x: torch.Tensor,
-    lora: MatryoshkaLoRA,
-    token_ranks: torch.Tensor,
-    r_b: int | None = None,
-    out: torch.Tensor | None = None,
-    add: bool = False,
-) -> torch.Tensor:
-    """r_b: batch maximum rank, if known (removes the host sync, so the call can be graph-captured).
-    out: write the delta there, or with add=True add it in a separate pass, as a PyTorch layer would."""
+def padded(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor, r_b: int | None = None) -> torch.Tensor:
+    """r_b: batch maximum rank, if known (removes the host sync, so the call can be graph-captured)."""
     r = int(token_ranks.max()) if r_b is None else r_b
     v = x @ lora.A_t[:r].T  # [T, r]
     mask = torch.arange(r, device=x.device) < token_ranks.unsqueeze(1)  # [T, r]
     v = v * mask.to(v.dtype)
     y = v @ lora.B[:r]  # [T, h_out]
-    y = apply_scale(y, lora, token_ranks)
-    if out is None:
-        return y
-    return out.add_(y) if add else out.copy_(y)
+    return apply_scale(y, lora, token_ranks)
 
 
 def _padded_body(
