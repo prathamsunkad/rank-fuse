@@ -1,0 +1,12 @@
+### Prefill (long prompts), r_max 64: baselines vs RankFuse
+
+NVIDIA A100 80GB PCIe, 4096 x 4096, fp16, 7 tiers, uniform mix, median of 3 seeds. With 1-16 requests the max rank depends on the draw, so RF1 is sometimes already narrow.
+
+| requests x tokens | tokens | max rank | rank groups | B1 us | B2g us | RF1 us | RF2 us | RF1 vs B1 | B2g vs B1 | RF2 vs RF1 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 x 2048 | 2048 | 1/2 | 1 | 52.0 | 133.1 | 31.9 | 33.3 | 1.63x | 0.39x | 0.96x |
+| 4 x 512 | 2048 | 2/32/64 | 2/4 | 56.3 | 167.9 | 35.4 | 36.0 | 1.59x | 0.34x | 0.98x |
+| 16 x 128 | 2048 | 32/64 | 6/7 | 55.9 | 212.0 | 42.7 | 43.2 | 1.31x | 0.26x | 0.99x |
+| 4 x 2048 | 8192 | 2/32/64 | 2/4 | 142.8 | 499.7 | 105.5 | 106.0 | 1.35x | 0.29x | 1.00x |
+| 8 x 1024 | 8192 | 16/32/64 | 4/5/6 | 128.7 | 506.9 | 105.3 | 105.6 | 1.22x | 0.25x | 1.00x |
+| 16 x 512 | 8192 | 32/64 | 6/7 | 141.5 | 517.1 | 134.2 | 137.2 | 1.05x | 0.27x | 0.98x |

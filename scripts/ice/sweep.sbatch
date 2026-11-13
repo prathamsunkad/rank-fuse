@@ -13,8 +13,6 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:h200:1
-#SBATCH --account=coc
-#SBATCH --qos=coc-ice
 #SBATCH --mem=64G
 #SBATCH -t 04:00:00
 #SBATCH -o results/slurm-%x-%j.out

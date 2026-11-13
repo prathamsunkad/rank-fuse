@@ -1,33 +1,24 @@
+"""rf1_masked: the first RF1, fused padded/masked LoRA in one Triton kernel.
 
-"""RankFuse v1: rank-aware shrink + expand, masked per token.
+    grid    (cdiv(T, BLOCK_M), cdiv(h_out, BLOCK_N)): each program owns one output tile
+    kernel  for each 16-row rank band below the batch maximum rank:
+                mid = x[rows] @ A_t[band].T         shrink over all of h_in, in fp32
+                mid[t, k] = 0 for k >= ranks[t]     per-token rank mask
+                out += mid @ B[band, cols]
+            then the per-token scale and one store
 
-Two Triton kernels (same split as Punica's SGMV shrink/expand), launched over the whole batch:
+Every column tile of a token block recomputes the same shrink (h_out / BLOCK_N times), which is
+what rf1_fused's split-K path (rankfuse_fused.py) removes. Kept as an ablation.
 
-    shrink:  v[t, :r_b] = x[t] @ A_t[:r_b].T        r_b = largest rank in the batch
-             columns k >= token_ranks[t] are written as 0 (masked, not computed if possible)
-    expand:  y[t]       = v[t, :r_t] @ B[:r_t]       reduction stops at each token's own rank
+Layouts (rankfuse/interface.py): x [T, h_in]; A_t [r_max, h_in] and B [r_max, h_out], rank-r
+prefix = rows [:r], contiguous; y [T, h_out], the LoRA delta only.
 
-Why two kernels and not one fused kernel: every output tile of y needs the full v row, which
-needs a reduction over all of h_in. A single kernel would recompute v once per h_out tile.
-Try fusing later as an experiment (see docs/PLAN.md).
+The commented-out code below is the original two-kernel draft (shrink to v in HBM, then
+expand), never finished.
 
-Layouts (rankfuse/interface.py):
-    x      [T, h_in]        row-major
-    A_t    [r_max, h_in]    rank-r prefix = rows [:r], contiguous
-    B      [r_max, h_out]   rank-r prefix = rows [:r], contiguous
-    v      [T, r_b]         intermediate, allocated by the wrapper
-    y      [T, h_out]       output (LoRA delta only)
-
-Things to watch:
-* tl.dot needs every block dimension >= 16, so BLOCK_R >= 16 even when ranks are 4 or 8.
-* Decode batches have very few tokens; a separate matrix-vector path may beat tl.dot there.
-* Accumulate in fp32, store in x.dtype.
-
-Develop on Phoenix. `TRITON_INTERPRET=1 python -m pytest -k rf1_masked` runs the kernels in
-Triton's CPU interpreter (Linux only), which is slow but allows print debugging.
+`TRITON_INTERPRET=1 python -m pytest -k rf1_masked` runs the kernel in Triton's CPU interpreter
+(Linux only), which is slow but allows print debugging.
 """
-
-"""RF1: fused padded/masked LoRA, used to isolate the benefit of fusion."""
 
 
 import torch
