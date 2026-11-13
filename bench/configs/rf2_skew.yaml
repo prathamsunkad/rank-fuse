@@ -1,0 +1,25 @@
+# Where rank skipping should win: r_max 128 and 256, rank mixes skewed to low ranks with some high
+# ranks. skew_low, zipf_1 and zipf_2 are sampled long-tail mixes; low_frac_<pct> are exact splits
+# down to a single r_max request (low_frac_100). No single-rank rows: rf2_ideal_bound.yaml gives the
+# ideal bound. rf2_ranges: one launch per bucket over a sorted batch's contiguous rows. Two scheduler
+# assumptions: physically sorted tokens (rf2_segment, request_order sorted) and a sorted index
+# list (rf2_index, request_order random). b1_padded guards against RF1's tuning gap at r_max 256;
+# rf2_bucketed_tuned vs rf2_bucketed estimates what larger blocks for narrow buckets would gain.
+name: rf2_skew
+impls: [rf1_fused, rf2_segment, rf2_index, rf2_ranges, rf2_ranges_seq, rf2_bucketed, rf2_bucketed_tuned, b1_padded, rf1_fused]
+timing: graph
+mode: add
+warmup: 10
+reps: 30
+graph_replays: 20
+flush_l2: true
+batches: [[256, 1], [512, 1], [2048, 1], [8192, 1], [32, 256], [16, 512]]
+grid:
+  h_in: 4096
+  h_out: 4096
+  r_max: [128, 256]
+  tiers: pow2
+  dist: [skew_low, zipf_1, zipf_2, low_frac_90, low_frac_99, low_frac_100]
+  request_order: [random, sorted]
+  dtype: fp16
+  seed: [0, 1, 2]

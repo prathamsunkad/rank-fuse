@@ -1,0 +1,23 @@
+# Serving-like batches on one layer: sampled rank mixes over the paper's powers-of-two tiers, with
+# decode batches and synthetic continuous-batching steps (workloads.py, SERVING_PREFIX). There is
+# no real trace or data on which ranks requests choose, so report these as assumptions.
+name: rf2_realistic
+impls: [rf1_fused, rf2_segment, rf2_segment_fw, rf2_bucketed, rf2_bucketed_seq, rf2_bucketed_tuned, b1_padded, rf1_fused]
+timing: graph
+mode: add
+warmup: 10
+reps: 30
+graph_replays: 20
+flush_l2: true
+grid:
+  num_requests: [8, 32, 128]
+  tokens_per_request: 1
+  lengths: [serving_0, serving_1, serving_4]
+  h_in: 4096
+  h_out: 4096
+  r_max: [64, 128, 256]
+  tiers: pow2
+  dist: [uniform, skew_low, skew_high]
+  request_order: [random, sorted]
+  dtype: fp16
+  seed: [0, 1, 2]

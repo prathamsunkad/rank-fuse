@@ -1,8 +1,8 @@
 # RankFuse: Matryoshka-LoRA Serving Plan
 
 This document fixes the project scope and lays out every step from the current kernels to
-end-to-end serving results. It extends [PLAN.md](PLAN.md), which stays the reference for the
-operator-level claims, baselines, and repository conventions.
+end-to-end serving results. The project's claims, baselines and repository conventions are in the
+[README](../README.md).
 
 Status as of 2026-10-25, verified on one NVIDIA H200 on PACE ICE (vLLM 0.32.0, PyTorch 2.13.0,
 Triton 3.7.1; 1020 tests passing, 29 skipped: B3 in fp32). How the kernels work and every number below:
@@ -13,9 +13,10 @@ Triton 3.7.1; 1020 tests passing, 29 skipped: B3 in fp32). How the kernels work 
     sweep, ncu). P0.4 in part: Qwen2.5-0.5B-Instruct as the development model, loading in stock
     vLLM with every generated adapter (`scripts/ice/vllm_lora_check.py`); the 7–8B headline
     model is not chosen yet. P0.5: `docs/VLLM_LORA_NOTES.md`.
-  * P1.1: `rf2_fused`, plus three RF2 variants on the split-K design: `rf2_splitk` (sorted),
-    `rf2_segment` (blocks of consecutive tokens) and `rf2_bucketed` (one kernel pair per rank
-    bucket, chosen per batch by `use_rf2`). P1.2. P1.3: `b3_vllm`. P1.5. P1.6 in part: ncu
+  * P1.1: `rf2_fused`, plus two RF2 variants on the split-K design: `rf2_segment` (blocks of
+    consecutive tokens) and `rf2_bucketed` (one kernel pair per rank bucket, chosen per batch by
+    `use_rf2`). A third, sorted `rf2_splitk`, was removed: on rank-sorted input it forms the same
+    blocks as `rf2_segment`, plus a sort and index lookups. P1.2. P1.3: `b3_vllm`. P1.5. P1.6 in part: ncu
     (`scripts/ice/ncu_profile.sh`); nsys launch counts not done. P1.7 in part: `rf1_fused`
     re-tuned by hand for the H200 (split-K shrink, multi-wave and tiled expand); no autotuning.
   * P2.1. P2.2: `bench/vllm_step_time.py` (LoRA share of a stock vLLM step) and
@@ -146,6 +147,9 @@ with the reason.
 | **Fusion** removes launches and intermediate traffic | Level 1 (RF1 vs B1, B1 graphed) | latency vs T, with launch breakdown |
 | **2.** Skipping unused ranks helps in some regimes | Level 1 (RF2 vs RF1 across rank distributions) | speedup vs rank distribution and T |
 | **End-to-end:** gains survive in a real server | Levels 2–3 | step time with LoRA-share breakdown; TPOT and goodput vs request rate |
+
+Claim 2 is falsifiable: the operator is memory-bound and most of its traffic is the same at every
+rank, so a well-explained "no" is a valid result. Report exactly where any benefit appears.
 
 ---
 
@@ -372,6 +376,8 @@ docs/VLLM_LORA_NOTES.md
 * **S-LoRA build** may not work with current PyTorch/CUDA. Time-box it (P1.4).
 * **Matryoshka tiers and scaling** must be confirmed from the paper and set in
   `rankfuse/workloads.py`.
+* **L2 flushing** is on by default (cold weights, as in a real forward pass). Report one run with
+  it off as an ablation.
 * **Gated models** (Llama) need a Hugging Face token on ICE; Qwen models are open.
 * **Decided (2026-10-22):**
   * GPU: H200 on PACE ICE (`ice-gpu` partition, `--gres=gpu:h200:1`); H100, then A100 if H200

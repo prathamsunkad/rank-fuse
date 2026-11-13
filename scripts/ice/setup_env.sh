@@ -22,5 +22,5 @@ pip install vllm                      # newest stable release; pinned afterwards
 pip install -e ".[analysis,dev]"      # not [gpu]: vLLM already installed a matching Triton
 pip install safetensors               # usually already present with vLLM
 
-python -c "import torch, triton, importlib.util; print('torch', torch.__version__, 'cuda', torch.version.cuda, \
-'triton', triton.__version__, 'vllm_spec', bool(importlib.util.find_spec('vllm')))"
+python -c "import torch, triton, vllm; print('torch', torch.__version__, 'cuda', torch.version.cuda, \
+'triton', triton.__version__, 'vllm', vllm.__version__)"

@@ -1,0 +1,20 @@
+# Decode-only half of rf2_realistic.yaml, up to 8192 single-token requests.
+name: rf2_realistic_decode
+impls: [rf1_fused, rf2_segment, rf2_segment_fw, rf2_bucketed, rf2_bucketed_tuned, b1_padded, rf1_fused]
+timing: graph
+mode: add
+warmup: 10
+reps: 30
+graph_replays: 20
+flush_l2: true
+grid:
+  num_requests: [1, 8, 32, 128, 512, 2048, 8192]
+  tokens_per_request: 1
+  h_in: 4096
+  h_out: 4096
+  r_max: [64, 128, 256]
+  tiers: pow2
+  dist: [uniform, skew_low, skew_high]
+  request_order: [random, sorted]
+  dtype: fp16
+  seed: [0, 1, 2]

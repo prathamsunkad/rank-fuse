@@ -22,17 +22,11 @@ H_OUT=${5:-4096}
 R_MAX=${6:-64}
 DIST=${7:-uniform}
 DTYPE=${8:-fp16}
-PROFILE_SORT=${PROFILE_SORT:-0}
 OUT=results/ncu/${IMPL}-r${REQUESTS}-t${TPR}-${H_IN}x${H_OUT}-r${R_MAX}-${DIST}-${DTYPE}
 mkdir -p results/ncu
 
-SORT_ARG=()
-if [ "$PROFILE_SORT" = 1 ]; then
-    SORT_ARG=(--profile-sort)
-    OUT="${OUT}-sort"
-fi
 ncu --profile-from-start off --set full -o "$OUT" -f \
-    python bench/ncu_driver.py "$IMPL" "$REQUESTS" "$TPR" "$H_IN" "$H_OUT" "$R_MAX" "$DIST" "$DTYPE" "${SORT_ARG[@]}"
+    python bench/ncu_driver.py "$IMPL" "$REQUESTS" "$TPR" "$H_IN" "$H_OUT" "$R_MAX" "$DIST" "$DTYPE"
 
 # On ICE, ncu saves a zstd-compressed .ncu-repz that `ncu --import` cannot open; unpack it.
 if [ ! -f "${OUT}.ncu-rep" ] && [ -f "${OUT}.ncu-repz" ]; then

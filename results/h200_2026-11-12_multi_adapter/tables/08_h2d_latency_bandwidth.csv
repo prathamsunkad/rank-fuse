@@ -1,9 +1,0 @@
-scope,label,pages,size MB,median ms,p95 ms,median GB/s,p95 GB/s
-Single 4096x4096 projection,1 page (r=16),1,0.25,0.012,0.012,22.38,21.72
-Single 4096x4096 projection,2 pages (r=32),2,0.5,0.016,0.017,31.88,30.96
-Single 4096x4096 projection,4 pages (r=64),4,1.0,0.026,0.027,39.67,39.33
-Single 4096x4096 projection,Full adapter (r=64),4,1.0,0.026,0.027,39.86,39.48
-Whole-model Qwen2.5-7B,1 page,1,81.0,1.544,1.548,55.0,54.88
-Whole-model Qwen2.5-7B,2 pages,2,162.0,3.081,3.084,55.14,55.08
-Whole-model Qwen2.5-7B,4 pages,4,324.0,6.153,6.159,55.22,55.16
-Whole-model Qwen2.5-7B,Full adapter (r=64),4,323.0,6.134,6.139,55.22,55.17

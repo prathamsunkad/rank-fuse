@@ -1,0 +1,21 @@
+# Launch overhead: the same workloads as rf2_realistic_decode.yaml timed eagerly with the per-step
+# metadata passed in, so eager minus graph is the Python and launch cost alone.
+name: rf2_eager
+impls: [rf1_fused, rf2_segment, rf2_segment_fw, rf2_bucketed, b1_padded]
+timing: eager
+prepared: true
+mode: add
+warmup: 10
+reps: 100
+flush_l2: true
+grid:
+  num_requests: [1, 32, 512, 8192]
+  tokens_per_request: 1
+  h_in: 4096
+  h_out: 4096
+  r_max: 64
+  tiers: pow2
+  dist: uniform
+  request_order: random
+  dtype: fp16
+  seed: [0, 1, 2]
