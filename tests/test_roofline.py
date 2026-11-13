@@ -1,4 +1,4 @@
-"""Roofline numbers must match the worked example in docs/ALGORITHMS.md, section 8.1."""
+"""Roofline numbers must match the worked example in docs/PLAN.md."""
 
 import pytest
 
