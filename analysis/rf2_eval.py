@@ -34,7 +34,7 @@ COMPARISONS = [
     ("Bucketed: extra tuning", "rf2_bucketed_tuned", "rf2_bucketed", {}),
     ("Bucketed: concurrent streams vs one after another", "rf2_bucketed", "rf2_bucketed_seq", {}),
 ]
-KEY = ["gpu", "mode", "shape", "num_requests", "tokens_per_request", "lengths", "r_max", "tiers", "dist", "request_order", "dtype"]
+KEY = ["gpu", "mode", "shape", "num_requests", "tokens_per_request", "lengths", "r_max", "tiers", "dist", "prefill_dist", "request_order", "dtype"]
 TOKEN_RANGES = [(1, 128, "<=128"), (129, 1024, "129-1024"), (1025, 4096, "1025-4096"), (4097, 10**9, ">4096")]
 
 

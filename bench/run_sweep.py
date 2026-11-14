@@ -196,7 +196,7 @@ def read_finished(path: Path, num_rows: int, keys: set[tuple[str, ...]]) -> tupl
     if not rows:
         return [], set()
     columns = list(Workload(1, 1).as_row())
-    key = lambda r: (r["shape"], *(r[c] for c in columns))  # noqa: E731
+    key = lambda r: (r["shape"], *(r.get(c) or "" for c in columns))  # noqa: E731  (older CSVs lack later columns)
     count: dict[tuple[str, ...], int] = {}
     for r in rows:
         count[key(r)] = count.get(key(r), 0) + 1
@@ -223,7 +223,7 @@ def main() -> None:
     impls = sorted(n for n in REGISTRY if n != "b0_reference") if cfg.get("impls", "all") == "all" else cfg["impls"]
     impls = [n for n in impls if not (REGISTRY[n].requires_cuda and a.device != "cuda")]
     workloads = expand_grid(cfg["grid"], cfg.get("shapes"), cfg.get("batches"))
-    unknown = sorted({w.dist for _, w in workloads if not is_known_dist(w.dist)})
+    unknown = sorted({d for _, w in workloads for d in (w.dist, w.prefill_dist) if d is not None and not is_known_dist(d)})
     if unknown:
         sys.exit(f"unknown rank mixes in {a.config}: {unknown}")
 

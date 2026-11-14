@@ -94,3 +94,45 @@ def test_unknown_order_and_lengths():
         Workload(2, 1, lengths="nope").request_lengths
     with pytest.raises(ValueError):
         Workload(2, 4, lengths="serving_1").request_lengths
+
+
+@pytest.mark.parametrize("decode, budget, chunk, expected", [
+    (32, 2048, 512, [512, 512, 512, 480]),
+    (256, 2048, 512, [512, 512, 512, 256]),
+    (0, 1024, 512, [512, 512]),
+    (64, 64, 512, []),
+])
+def test_chunked_step_shape(decode, budget, chunk, expected):
+    w = Workload(decode, 1, h_in=8, h_out=8, seed=3, lengths=f"chunked_{budget}_{chunk}")
+    lens, prefill = w.request_lengths, w.request_is_prefill
+    assert w.num_tokens == budget and lens == w.request_lengths
+    assert sorted(n for n, p in zip(lens, prefill) if p) == sorted(expected)
+    assert [n for n, p in zip(lens, prefill) if not p] == [1] * decode
+    assert make_batch(w).num_tokens == budget
+
+
+@pytest.mark.parametrize("bad", ["chunked_2048", "chunked_2048_0", "chunked_16_x", "chunked_2048_512_1"])
+def test_chunked_bad_presets(bad):
+    with pytest.raises(ValueError):
+        Workload(32, 1, lengths=bad).request_lengths
+
+
+def test_prefill_dist_ranks_by_request_type():
+    w = Workload(64, 1, h_in=8, h_out=8, r_max=128, dist="all_min", prefill_dist="all_max", lengths="chunked_2048_256", seed=1)
+    ranks = sample_request_ranks(w, torch.Generator().manual_seed(0))
+    assert all(r == (128 if p else 1) for r, p in zip(ranks, w.request_is_prefill))
+    b = make_batch(w)
+    assert b.token_ranks.tolist().count(1) == 64 and b.num_tokens == 2048
+
+
+def test_prefill_dist_none_keeps_serving_batches():
+    """serving_<k> steps keep their shapes and ranks with the new field at its default."""
+    for seed in range(4):
+        a = make_batch(Workload(32, 1, h_in=8, h_out=8, dist="skew_low", seed=seed, lengths="serving_4"))
+        b = make_batch(Workload(32, 1, h_in=8, h_out=8, dist="skew_low", seed=seed, lengths="serving_4", prefill_dist=None))
+        assert torch.equal(a.token_ranks, b.token_ranks) and torch.equal(a.x, b.x)
+
+
+def test_prefill_dist_needs_a_step():
+    with pytest.raises(ValueError):
+        make_batch(Workload(4, 8, h_in=8, h_out=8, prefill_dist="all_max"))

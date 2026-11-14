@@ -70,7 +70,7 @@ Report every case, including those where RF2 loses, against the ideal bound.
 | Case | Workload | Config |
 |---|---|---|
 | **Best** | Large batches of 25–99% low ranks with the rest at r_max, down to a single request at r_max (`low_frac_100`) forcing RF1 to full width | `rf2_ideal.yaml` |
-| **Average** | Sampled rank mixes and simulated serving steps; these mixes are assumptions, not a real trace | `rf2_realistic.yaml`, `rf2_realistic_decode.yaml`, `rf2_shapes.yaml` |
+| **Average** | Sampled rank mixes, simulated serving steps and chunked-prefill steps mixing decodes with prompt chunks; these mixes are assumptions, not a real trace | `rf2_realistic.yaml`, `rf2_realistic_decode.yaml`, `rf2_shapes.yaml`, `rf2_mixed.yaml` |
 | **Worst** | All tokens at one rank (RF1 is already narrow), and small decode batches where launch cost dominates | `all_min` and `all_max` in `rf2_ideal.yaml`, `parity.yaml`; `num_requests` in `rf2_realistic_decode.yaml` |
 
 Change one variable at a time to isolate its effect:
@@ -81,6 +81,8 @@ Change one variable at a time to isolate its effect:
 | Maximum rank | `r_max` (64, 128, 256; the paper's setting goes up to 256) |
 | Batch size | `num_requests` |
 | Prefill vs decode | `tokens_per_request`, `lengths` |
+| Decode share of a mixed step (chunked prefill) | `lengths: chunked_<budget>_<chunk>` with `num_requests` decodes |
+| Separate rank mix for prefill requests | `prefill_dist` (decodes use `dist`) |
 | Total tokens | `batches` (`[num_requests, tokens_per_request]`) |
 | Request order | `request_order` |
 

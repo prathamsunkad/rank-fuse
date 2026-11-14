@@ -1,0 +1,28 @@
+# Mixed prefill + decode steps, as with vLLM's chunked prefill: num_requests decodes, then prefill
+# chunks filling a fixed token budget (lengths: chunked_<budget>_<chunk>, workloads.py). This sets
+# the decode share of the step directly, unlike serving_<k>'s sampled prompt lengths.
+# prefill_dist gives prefill requests their own rank mix: null draws every request from `dist`;
+# skew_high and all_max test the case where long prompts run at high ranks while decodes stay low.
+# Synthetic, with no trace behind it: report these as assumptions. The two scheduler assumptions as
+# in rf2_skew.yaml: rf2_segment / rf2_ranges on sorted order, rf2_index on random order.
+name: rf2_mixed
+impls: [rf1_fused, rf2_segment, rf2_index, rf2_ranges, rf2_bucketed_tuned, b1_padded, rf1_fused]
+timing: graph
+mode: add
+warmup: 10
+reps: 30
+graph_replays: 20
+flush_l2: true
+grid:
+  num_requests: [32, 256]
+  tokens_per_request: 1
+  lengths: [chunked_2048_512, chunked_8192_512, chunked_8192_2048]
+  h_in: 4096
+  h_out: 4096
+  r_max: [128, 256]
+  tiers: pow2
+  dist: [skew_low, zipf_1]
+  prefill_dist: [null, skew_high, all_max]
+  request_order: [random, sorted]
+  dtype: fp16
+  seed: [0, 1, 2]
