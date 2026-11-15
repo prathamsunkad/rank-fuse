@@ -1,8 +1,20 @@
-# Mixed prefill + decode steps, as with vLLM's chunked prefill: num_requests decodes, then prefill
-# chunks filling a fixed token budget (lengths: chunked_<budget>_<chunk>, workloads.py). This sets
-# the decode share of the step directly, unlike serving_<k>'s sampled prompt lengths.
-# prefill_dist gives prefill requests their own rank mix: null draws every request from `dist`;
-# skew_high and all_max test the case where long prompts run at high ranks while decodes stay low.
+# Serving steps under vLLM-style chunked prefill: num_requests running decodes are scheduled first,
+# then waiting prompts take what is left of the token budget (max_num_batched_tokens: 2048 is
+# vLLM's online-server default, 8192 its offline default). Four step types, each its own grid
+# below, so results can be reported per type and weighted by how often a server sees each:
+#   1. decode only           most steps at steady state; no prompt is waiting
+#   2. one prompt fills      a long prompt takes the whole leftover budget (vLLM's default policy):
+#                            chunked_<budget>_<budget> = the decodes + one chunk of budget - decodes
+#   3. short prompts         one or two sampled prompts (log-normal, median 256 tokens) that do not
+#                            fill the budget: serving_<k>_<budget>; decodes hold much of the step
+#   4. many partial prefills several prompts each capped at <chunk> tokens, as with vLLM's
+#                            long_prefill_token_threshold / max_num_partial_prefills (not default)
+# Decode share of the step's tokens: 100% (1), 3.5-83% depending on the sampled prompts (3, 31-83%
+# with 256 decodes at budget 2048), 0.4-12.5% (2 and 4), so decode-heavy and prefill-heavy mixed
+# steps are both covered.
+# prefill_dist gives prompts their own rank mix (null: every request draws from `dist`); skew_high
+# and all_max test long prompts at high ranks while decodes stay low. Steps of type 1 have no
+# prompts, so they take no prefill_dist.
 # Synthetic, with no trace behind it: report these as assumptions. The two scheduler assumptions as
 # in rf2_skew.yaml: rf2_segment / rf2_ranges on sorted order, rf2_index on random order.
 name: rf2_mixed
@@ -13,16 +25,25 @@ warmup: 10
 reps: 30
 graph_replays: 20
 flush_l2: true
-grid:
+common: &common
   num_requests: [32, 256]
   tokens_per_request: 1
-  lengths: [chunked_2048_512, chunked_8192_512, chunked_8192_2048]
   h_in: 4096
   h_out: 4096
   r_max: [128, 256]
   tiers: pow2
   dist: [skew_low, zipf_1]
-  prefill_dist: [null, skew_high, all_max]
   request_order: [random, sorted]
   dtype: fp16
   seed: [0, 1, 2]
+grid:
+  - <<: *common                                         # 1. decode only
+  - <<: *common                                         # 2. one prompt fills the budget
+    lengths: [chunked_2048_2048, chunked_8192_8192]
+    prefill_dist: [null, skew_high, all_max]
+  - <<: *common                                         # 3. short prompts, budget not filled
+    lengths: [serving_1_2048, serving_2_8192]
+    prefill_dist: [null, skew_high, all_max]
+  - <<: *common                                         # 4. many partial prefills
+    lengths: [chunked_2048_512, chunked_8192_512, chunked_8192_2048]
+    prefill_dist: [null, skew_high, all_max]

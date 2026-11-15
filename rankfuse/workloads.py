@@ -40,6 +40,9 @@ DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
 # adds k new prompts to num_requests decode requests. Prompt lengths are log-normal (median 256,
 # sigma 1, at most 4096 tokens) and the step holds at most 8192 tokens, as with vLLM's
 # max_num_batched_tokens. Prompt positions in the batch are drawn from the seed.
+# "serving_<k>_<budget>" caps the step at <budget> tokens instead (e.g. 2048, vLLM's online-server
+# default). Prompts are sampled, so unlike chunked_ the step need not fill its budget: the common
+# case of one or two short prompts joining many decodes, where decodes hold most of the tokens.
 SERVING_PREFIX = "serving_"
 SERVING_MEDIAN_TOKENS = 256
 SERVING_MAX_PROMPT = 4096
@@ -87,7 +90,7 @@ class Workload:
     seed: int = 0
     tiers: tuple[int, ...] | str | None = None  # explicit ranks, a TIER_PRESETS name, or default_tiers(r_max)
     request_order: str = "random"  # "sorted": whole requests physically ordered by rank
-    lengths: str | None = None  # "serving_<k>" or "chunked_<budget>_<chunk>": see above; None: tokens_per_request each
+    lengths: str | None = None  # "serving_<k>[_<budget>]" or "chunked_<budget>_<chunk>": see above; None: tokens_per_request each
     # Rank mix of prefill requests in a serving_ or chunked_ step; None: every request draws from
     # `dist`. When set, decode requests draw from `dist` and prefill requests from this, each group
     # on its own (a low_frac_<pct> mix keeps one request of that group at the top tier).
@@ -102,10 +105,13 @@ class Workload:
         # Its own generator, so the same step shape appears whatever the rank mix.
         gen = torch.Generator().manual_seed(self.seed + 2)
         lens = [1] * self.num_requests
-        if self.lengths.startswith(SERVING_PREFIX) and self.lengths.removeprefix(SERVING_PREFIX).isdigit():
-            k = int(self.lengths.removeprefix(SERVING_PREFIX))
+        serving = self.lengths.removeprefix(SERVING_PREFIX).split("_")
+        if self.lengths.startswith(SERVING_PREFIX) and len(serving) <= 2 and all(v.isdigit() for v in serving):
+            k, budget = int(serving[0]), int(serving[1]) if len(serving) == 2 else SERVING_MAX_TOKENS
+            if len(serving) == 2 and budget < self.num_requests + k:
+                raise ValueError(f"{self.lengths!r}: needs room for {self.num_requests} decodes and {k} prompts")
             drawn = (SERVING_MEDIAN_TOKENS * torch.randn(k, generator=gen, dtype=torch.float64).exp()).round().clamp(1, SERVING_MAX_PROMPT)
-            room = SERVING_MAX_TOKENS - self.num_requests
+            room = budget - self.num_requests
             for n in drawn.tolist():
                 lens.append(max(1, min(int(n), room - (k - 1))))
                 room -= lens[-1]

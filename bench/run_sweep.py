@@ -160,14 +160,18 @@ def time_graph(fn, args, kwargs, warmup: int, reps: int, replays: int, flush_l2:
     return times
 
 
-def expand_grid(grid: dict, shapes: dict | None = None, batches: list | None = None) -> list[tuple[str, Workload]]:
+def expand_grid(grid: dict | list[dict], shapes: dict | None = None, batches: list | None = None) -> list[tuple[str, Workload]]:
     """Every combination of the grid values, as (shape name, workload).
 
+    A list of grids expands each in turn and joins them, for parts that are not a cross product
+    of each other (e.g. pure decode steps, which take no prefill_dist, beside mixed steps).
     `shapes` maps a projection name to [h_in, h_out] (e.g. a model's q/kv/gate_up/down) and
     replaces the grid's h_in and h_out; without it, the shape name is "h_in x h_out".
     `batches` lists [num_requests, tokens_per_request] pairs and replaces those two grid keys,
     for batch shapes that are not a cross product (e.g. 4 x 512 and 16 x 128 but not 4 x 128).
     """
+    if isinstance(grid, list):
+        return [sw for g in grid for sw in expand_grid(g, shapes, batches)]
     named = [(name, {"h_in": h_in, "h_out": h_out}) for name, (h_in, h_out) in (shapes or {}).items()]
     pairs = [{"num_requests": n, "tokens_per_request": t} for n, t in batches] if batches else [{}]
     if batches and {"num_requests", "tokens_per_request"} & set(grid):
