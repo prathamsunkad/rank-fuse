@@ -40,10 +40,20 @@ DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
 # adds k new prompts to num_requests decode requests. Prompt lengths are log-normal (median 256,
 # sigma 1, at most 4096 tokens) and the step holds at most 8192 tokens, as with vLLM's
 # max_num_batched_tokens. Prompt positions in the batch are drawn from the seed.
+# "serving_<k>_<budget>" caps the step at <budget> tokens instead (e.g. 2048, vLLM's online-server
+# default). Prompts are sampled, so unlike chunked_ the step need not fill its budget: the common
+# case of one or two short prompts joining many decodes, where decodes hold most of the tokens.
 SERVING_PREFIX = "serving_"
 SERVING_MEDIAN_TOKENS = 256
 SERVING_MAX_PROMPT = 4096
 SERVING_MAX_TOKENS = 8192
+
+# One chunked-prefill step, as with vLLM's chunked prefill: "chunked_<budget>_<chunk>" schedules
+# num_requests decode requests first, then fills the rest of a <budget>-token step with prefill
+# chunks of <chunk> tokens; the last chunk takes whatever room is left. So decodes and prefill
+# take a set share of the step: chunked_2048_512 with 32 decodes is 32 x 1 + 3 x 512 + 1 x 480.
+# Positions in the batch are drawn from the seed, as for serving_<k>. Also synthetic, not a trace.
+CHUNKED_PREFIX = "chunked_"
 
 
 def default_tiers(r_max: int) -> list[int]:
@@ -80,27 +90,54 @@ class Workload:
     seed: int = 0
     tiers: tuple[int, ...] | str | None = None  # explicit ranks, a TIER_PRESETS name, or default_tiers(r_max)
     request_order: str = "random"  # "sorted": whole requests physically ordered by rank
-    lengths: str | None = None  # "serving_<k>": see SERVING_PREFIX; None: tokens_per_request each
+    lengths: str | None = None  # "serving_<k>[_<budget>]" or "chunked_<budget>_<chunk>": see above; None: tokens_per_request each
+    # Rank mix of prefill requests in a serving_ or chunked_ step; None: every request draws from
+    # `dist`. When set, decode requests draw from `dist` and prefill requests from this, each group
+    # on its own (a low_frac_<pct> mix keeps one request of that group at the top tier).
+    prefill_dist: str | None = None
 
-    @property
-    def request_lengths(self) -> list[int]:
-        """Tokens of every request, in sampling order (the batch order unless sorted by rank)."""
+    def _shape(self) -> tuple[list[int], list[bool]]:
+        """Tokens of every request and whether it is a prefill request, in sampling order."""
         if self.lengths is None:
-            return [self.tokens_per_request] * self.num_requests
-        if not self.lengths.startswith(SERVING_PREFIX) or not self.lengths.removeprefix(SERVING_PREFIX).isdigit():
-            raise ValueError(f"unknown lengths preset {self.lengths!r}")
+            return [self.tokens_per_request] * self.num_requests, [self.tokens_per_request > 1] * self.num_requests
         if self.tokens_per_request != 1:
             raise ValueError("a serving step's decode requests have one token each")
         # Its own generator, so the same step shape appears whatever the rank mix.
         gen = torch.Generator().manual_seed(self.seed + 2)
-        k = int(self.lengths.removeprefix(SERVING_PREFIX))
-        drawn = (SERVING_MEDIAN_TOKENS * torch.randn(k, generator=gen, dtype=torch.float64).exp()).round().clamp(1, SERVING_MAX_PROMPT)
-        lens, room = [1] * self.num_requests, SERVING_MAX_TOKENS - self.num_requests
-        for n in drawn.tolist():
-            lens.append(max(1, min(int(n), room - (k - 1))))
-            room -= lens[-1]
-            k -= 1
-        return [lens[i] for i in torch.randperm(len(lens), generator=gen).tolist()]
+        lens = [1] * self.num_requests
+        serving = self.lengths.removeprefix(SERVING_PREFIX).split("_")
+        if self.lengths.startswith(SERVING_PREFIX) and len(serving) <= 2 and all(v.isdigit() for v in serving):
+            k, budget = int(serving[0]), int(serving[1]) if len(serving) == 2 else SERVING_MAX_TOKENS
+            if len(serving) == 2 and budget < self.num_requests + k:
+                raise ValueError(f"{self.lengths!r}: needs room for {self.num_requests} decodes and {k} prompts")
+            drawn = (SERVING_MEDIAN_TOKENS * torch.randn(k, generator=gen, dtype=torch.float64).exp()).round().clamp(1, SERVING_MAX_PROMPT)
+            room = budget - self.num_requests
+            for n in drawn.tolist():
+                lens.append(max(1, min(int(n), room - (k - 1))))
+                room -= lens[-1]
+                k -= 1
+        elif self.lengths.startswith(CHUNKED_PREFIX) and all(v.isdigit() for v in self.lengths.removeprefix(CHUNKED_PREFIX).split("_")) \
+                and self.lengths.count("_") == 2:
+            budget, chunk = map(int, self.lengths.removeprefix(CHUNKED_PREFIX).split("_"))
+            if chunk < 1 or budget < self.num_requests:
+                raise ValueError(f"{self.lengths!r}: needs a chunk of at least 1 and room for {self.num_requests} decodes")
+            room = budget - self.num_requests
+            lens += [chunk] * (room // chunk) + ([room % chunk] if room % chunk else [])
+        else:
+            raise ValueError(f"unknown lengths preset {self.lengths!r}")
+        prefill = [False] * self.num_requests + [True] * (len(lens) - self.num_requests)
+        order = torch.randperm(len(lens), generator=gen).tolist()
+        return [lens[i] for i in order], [prefill[i] for i in order]
+
+    @property
+    def request_lengths(self) -> list[int]:
+        """Tokens of every request, in sampling order (the batch order unless sorted by rank)."""
+        return self._shape()[0]
+
+    @property
+    def request_is_prefill(self) -> list[bool]:
+        """Whether each request (in sampling order) is a prefill request rather than a decode."""
+        return self._shape()[1]
 
     @property
     def num_tokens(self) -> int:
@@ -119,18 +156,31 @@ class Workload:
         return row
 
 
-def sample_request_ranks(w: Workload, gen: torch.Generator) -> list[int]:
-    tiers = w.rank_tiers
-    n = len(w.request_lengths)
-    if not is_known_dist(w.dist):
-        raise ValueError(f"unknown rank mix {w.dist!r}")
-    if w.dist.startswith(LOW_FRAC_PREFIX):
-        n_low = min(round(int(w.dist.removeprefix(LOW_FRAC_PREFIX)) / 100 * n), n - 1)
+def _sample_ranks(dist: str, tiers: list[int], n: int, gen: torch.Generator) -> list[int]:
+    if not is_known_dist(dist):
+        raise ValueError(f"unknown rank mix {dist!r}")
+    if n == 0:
+        return []
+    if dist.startswith(LOW_FRAC_PREFIX):
+        n_low = min(round(int(dist.removeprefix(LOW_FRAC_PREFIX)) / 100 * n), n - 1)
         ranks = [tiers[0]] * n_low + [tiers[-1]] * (n - n_low)
         return [ranks[i] for i in torch.randperm(n, generator=gen).tolist()]
-    probs = torch.tensor(DISTRIBUTIONS[w.dist](len(tiers)), dtype=torch.float64)
+    probs = torch.tensor(DISTRIBUTIONS[dist](len(tiers)), dtype=torch.float64)
     idx = torch.multinomial(probs, n, replacement=True, generator=gen)
     return [tiers[i] for i in idx.tolist()]
+
+
+def sample_request_ranks(w: Workload, gen: torch.Generator) -> list[int]:
+    """Rank of every request, in sampling order. With prefill_dist, decode requests are drawn
+    first from dist, then prefill requests from prefill_dist."""
+    if w.prefill_dist is None:
+        return _sample_ranks(w.dist, w.rank_tiers, len(w.request_lengths), gen)
+    if w.lengths is None:
+        raise ValueError("prefill_dist needs a serving_ or chunked_ step (lengths)")
+    is_prefill = w.request_is_prefill
+    decode = iter(_sample_ranks(w.dist, w.rank_tiers, is_prefill.count(False), gen))
+    prefill = iter(_sample_ranks(w.prefill_dist, w.rank_tiers, is_prefill.count(True), gen))
+    return [next(prefill) if p else next(decode) for p in is_prefill]
 
 
 def make_lora(w: Workload, device: str | torch.device = "cpu") -> MatryoshkaLoRA:
