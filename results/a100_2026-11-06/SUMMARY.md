@@ -8,8 +8,8 @@ every median in µs, one row per workload: `RAW.md`, and the same as a CSV for a
 `raw_medians.csv`; ablation: `RF1_ABLATION.md`.
 Single-rank batches (`all_max`, `all_min`) are not counted. Geomeans over mixes and batch sizes.
 
-Not final: a retune that adds loop-vs-tiled expand (commit f65d09a, job 15336639) may change
-widths 128 and 256; these sweeps will be rerun if it does.
+Superseded by `../a100_2026-11-15/SUMMARY.md`: the retune that adds the loop expand changed
+widths 128 and 256, and those are the final numbers.
 
 ## Kernels
 
