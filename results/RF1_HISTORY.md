@@ -105,3 +105,15 @@ written.
 * Loses to B1 at r_max 256 when everything runs at full width (0.72×). This is the one regime where
   RF1 alone is not enough; RF2 (see `RF2_HISTORY.md`) more than recovers it on mixed-rank batches.
 * Next step if RF1 itself must match B1 at width 256: an expand that loops over the rank in chunks.
+
+## Final: loop expand in the tuning (15 Nov)
+
+* **Rank chunks** (d63327f, job 15633364; not merged): the shrink splits rank rows across programs
+  and the tiled expand walks the rank in chunks. The results were correct but not faster. The
+  tuning chose them in one cell (+1%); elsewhere they were 0–25% slower, because each chunk re-reads
+  `x`.
+* **Loop expand as a tuned option** (f65d09a, retuned in job 15681134): widths 128 and 256 now use
+  the column-loop expand at every token count. RF1 at full width 256 with 8192 tokens went from 602
+  to 372 µs (B1: 355). Over mixed-rank workloads RF1 vs B1 went from 1.12× to 1.31× geomean. At
+  r_max 128 it is 1.5–1.7×, and at r_max 256 it is 1.01× (prefill) and 0.88× (decode).
+  Details: `a100_2026-11-15/SUMMARY.md`.

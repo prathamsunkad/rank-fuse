@@ -118,5 +118,14 @@ they are 0.91× / 0.88× / 1.10× of segment at r_max 64 / 128 / 256; concurrent
   over 8192 tokens; per-bucket plans built per request by a scheduler, not measured).
 * Per-bucket launch sizes depend on the bucket counts, so under CUDA graphs a step with different
   counts needs another graph or padding. A device-side plan is future work.
-* These are the numbers with the first tuned table. The loop-expand retune (commit f65d09a, job
-  15336639) may move r_max 128 and 256 slightly.
+* These are the numbers with the first tuned table. For the final numbers, see the next section.
+
+## Final: loop-expand retune (15 Nov)
+
+The table was retuned with the expand mode in the search (job 15681134), and widths 128 and 256
+moved to the loop expand. `rf2_ranges` is the main kernel: it beats B1 in 193 of 198 workloads
+(1.85× geomean, from 185 and 1.80×). Its only losses are 5 cases of `low_frac_25` / `low_frac_50` at
+r_max 256, which now average 1.03× and 1.10× (from 0.85× and 0.99×). `rf2_segment` (1.44×) and
+`rf2_bucketed_tuned` (1.60×) lose a little on mostly-low mixes, because their batch-wide lookup gives
+narrow blocks the width-256 settings. Making that lookup depend on the batch was tried and did not
+help. Details: `a100_2026-11-15/SUMMARY.md`.
