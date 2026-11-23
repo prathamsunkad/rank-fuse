@@ -6,9 +6,12 @@ LoRALinear: out = base(x), then the Matryoshka LoRA delta is added into out by o
     none     no LoRA
     torch    reference: fp32 shrink, per-token rank mask, fp32 expand (slow, obviously correct)
     b1       b1_padded's body (PyTorch: pad to the batch maximum rank, mask, two cuBLAS matmuls)
+    b2       b2_grouped's body (PyTorch: one matmul pair per distinct rank, added with index_add_);
+             the groups are built once per forward for all layers
     b3       vLLM's _lora_shrink / _lora_expand, the rank tiers registered as padded adapters
              (rankfuse/baselines/vllm_ops.py); metadata built once per forward for all layers
     rf1      rf1_fused's split-K path (rankfuse_lora, add=True)
+    rf2sk    sorted split-K RF2 (rankfuse_rf2_splitk.py); the stable rank order is built once per forward
     rf2seg   segment RF2 (rankfuse_rf2_segment.py, contig blocks), add=True
     rf2bkt   bucketed RF2 (rankfuse_rf2_bucketed.py, per-bucket kernels on concurrent streams)
     rf2auto  per batch, rf2bkt where use_rf2 picks it (only with ctx.graphed), else rf1
@@ -38,11 +41,12 @@ from rankfuse.interface import MatryoshkaLoRA  # noqa: E402
 from rankfuse.kernels import rankfuse_fused as rf  # noqa: E402
 from rankfuse.kernels import rankfuse_rf2_bucketed as bkt  # noqa: E402
 from rankfuse.kernels import rankfuse_rf2_segment as seg  # noqa: E402
+from rankfuse.kernels import rankfuse_rf2_splitk as sk  # noqa: E402
 
 MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
 ADAPTER = os.path.join(os.environ.get("RF_ADAPTERS", "."), "qwen2.5-0.5b", "matryoshka-0", "adapter_model.safetensors")
 TIERS = [1, 2, 4, 8, 16, 32, 64]
-BACKENDS = ["none", "torch", "b1", "b3", "rf1", "rf2seg", "rf2bkt", "rf2auto"]
+BACKENDS = ["none", "torch", "b1", "b2", "b3", "rf1", "rf2sk", "rf2seg", "rf2bkt", "rf2auto"]
 PROJ = {"self_attn": ["q_proj", "k_proj", "v_proj", "o_proj"], "mlp": ["gate_proj", "up_proj", "down_proj"]}
 
 
@@ -62,10 +66,12 @@ class Ctx:
         n = ranks.numel()
         self.bm = seg.block_m_for(n, max(self.r, 1))
         self.blocks = seg.contig_blocks(n, self.bm, device)
+        self.order = torch.argsort(ranks, stable=True)
         if self.copy_of_rank is None:
             self.copy_of_rank = torch.full((self.r_max + 1,), -1, dtype=torch.int32, device=device)
             for i, r in enumerate(TIERS):
                 self.copy_of_rank[r] = i
+        self.b2_groups = [(r, torch.nonzero(ranks == r).squeeze(1)) for r in sorted(set(request_ranks)) if r > 0]
         self.b3_step = vllm_ops.Step(self.copy_of_rank, len(TIERS), self.r_max, ranks)
         self.plan = bkt.Plan(ranks, device)
         self.auto_rf2 = bkt.use_rf2(self.plan, tokens_per_request, self.graphed)
@@ -95,10 +101,15 @@ class LoRALinear(nn.Module):
                 y = (y.float() + v @ self.B.float()).to(y.dtype)
             elif c.backend == "b1":
                 y += padded._padded_body(x2, self.lora, c.ranks, c.r, None)
+            elif c.backend == "b2":
+                for r, idx in c.b2_groups:
+                    y.index_add_(0, idx, (x2[idx] @ self.A_t[:r].T) @ self.B[:r])
             elif c.backend == "b3":
                 vllm_ops.apply(x2, self.b3, c.b3_step, y, add=True)
             elif c.backend == "rf1" or (c.backend == "rf2auto" and not c.auto_rf2):
                 rf.rankfuse_lora(x2, self.A_t, self.B, c.ranks, out=y, add=True, r_limit=c.r)
+            elif c.backend == "rf2sk":
+                sk.rf2_splitk(x2, self.A_t, self.B, c.ranks, c.r, order=c.order, out=y, add=True)
             elif c.backend == "rf2seg":
                 seg.rf2_segment(x2, self.A_t, self.B, c.ranks, c.r, c.blocks, c.bm, out=y, add=True)
             elif c.backend in ("rf2bkt", "rf2auto"):

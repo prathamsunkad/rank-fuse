@@ -1,0 +1,140 @@
+---------------------------------------
+Begin Slurm Prolog: Oct-25-2026 22:45:24
+Job ID:    6594321
+User ID:   psunkad3
+Account:   cse
+Job name:  b2-runs2
+Partition: ice-gpu
+QOS:       coc-ice
+---------------------------------------
+name, clocks.current.sm [MHz], clocks.max.sm [MHz], temperature.gpu, power.draw [W]
+NVIDIA H200, 345 MHz, 1980 MHz, 36, 80.82 W
+NVIDIA H200 | torch 2.13.0+cu130 | triton 3.7.1
+
+[table 01] one layer, write mode (rf1_final_sweep batches)
+  uniform T=1                        groups 1  b2    13.7  rf1     5.4
+  uniform T=8                        groups 4  b2    52.0  rf1     5.7
+  uniform T=32                       groups 7  b2    89.2  rf1     7.3
+  uniform T=128                      groups 7  b2    96.3  rf1     8.1
+  uniform T=256                      groups 7  b2    98.4  rf1    11.5
+  uniform T=512                      groups 7  b2   100.8  rf1    12.1
+  uniform T=1024                     groups 7  b2   109.8  rf1    13.2
+  uniform T=2048                     groups 7  b2   144.7  rf1    19.7
+  uniform T=4096                     groups 7  b2   199.9  rf1    38.2
+  uniform T=8192                     groups 7  b2   300.5  rf1    61.6
+  skew_low T=1                       groups 1  b2    15.2  rf1     5.6
+  skew_low T=8                       groups 4  b2    51.7  rf1     5.5
+  skew_low T=32                      groups 7  b2    91.3  rf1     7.6
+  skew_low T=128                     groups 7  b2    95.3  rf1     8.1
+  skew_low T=256                     groups 7  b2    98.8  rf1    11.1
+  skew_low T=512                     groups 7  b2   100.7  rf1    12.1
+  skew_low T=1024                    groups 7  b2   112.8  rf1    13.1
+  skew_low T=2048                    groups 7  b2   145.3  rf1    19.2
+  skew_low T=4096                    groups 7  b2   200.4  rf1    38.2
+  skew_low T=8192                    groups 7  b2   309.0  rf1    61.7
+
+[table 02] one layer, add mode
+  uniform T=512                      groups 7  b2_add   103.3  rf1_add    12.6
+  uniform T=2048                     groups 7  b2_add   163.8  rf1_add    23.2
+  uniform T=4096                     groups 7  b2_add   255.4  rf1_add    46.4
+  uniform T=8192                     groups 7  b2_add   413.0  rf1_add    79.5
+
+[table 03] the B3 comparison batches, add mode
+  decode:1:1:uniform                 groups 1  b2_add    14.1  rf1_add     5.7
+  decode:1:1:skew_low                groups 1  b2_add    14.0  rf1_add     5.7
+  decode:1:1:all_max                 groups 1  b2_add    14.4  rf1_add     7.3
+  decode:8:1:uniform                 groups 4  b2_add    48.8  rf1_add     6.0
+  decode:8:1:skew_low                groups 4  b2_add    47.4  rf1_add     5.7
+  decode:8:1:all_max                 groups 1  b2_add    16.6  rf1_add     7.4
+  decode:32:1:uniform                groups 7  b2_add    93.1  rf1_add     7.9
+  decode:32:1:skew_low               groups 7  b2_add    95.5  rf1_add     7.6
+  decode:32:1:all_max                groups 1  b2_add    14.0  rf1_add     7.6
+  decode:128:1:uniform               groups 7  b2_add   105.8  rf1_add     8.4
+  decode:128:1:skew_low              groups 7  b2_add   108.7  rf1_add     8.6
+  decode:128:1:all_max               groups 1  b2_add    17.3  rf1_add     8.3
+  decode:512:1:uniform               groups 7  b2_add   104.2  rf1_add    12.6
+  decode:2048:1:uniform              groups 7  b2_add   160.8  rf1_add    22.3
+  decode:8192:1:uniform              groups 7  b2_add   413.6  rf1_add    79.5
+  prompt:4:512:uniform               groups 2  b2_add   107.0  rf1_add    15.6
+  prompt:16:512:skew_low             groups 4  b2_add   391.1  rf1_add    64.2
+  prompt:4:2048:uniform              groups 2  b2_add   391.3  rf1_add    64.5
+  mixed:16x512:r4+r64                groups 2  b2_add   400.2  rf1_add    79.6
+
+[table 07] the sorted RF2 batches (rf2_splitk_v2.py)
+  1 x 1 uniform                      groups 1  b2    15.4  rf1     5.6  rf2_splitk     6.1
+  1 x 1 skew_low                     groups 1  b2    14.9  rf1     5.6  rf2_splitk     6.4
+  1 x 1 skew_high                    groups 1  b2    15.6  rf1     6.0  rf2_splitk     6.9
+  8 x 1 uniform                      groups 4  b2    52.4  rf1     5.8  rf2_splitk     6.4
+  8 x 1 skew_low                     groups 4  b2    51.2  rf1     5.7  rf2_splitk     6.2
+  8 x 1 skew_high                    groups 5  b2    64.6  rf1     6.2  rf2_splitk     6.8
+  32 x 1 uniform                     groups 7  b2    89.6  rf1     7.7  rf2_splitk     8.0
+  32 x 1 skew_low                    groups 7  b2    91.6  rf1     7.6  rf2_splitk     8.1
+  32 x 1 skew_high                   groups 6  b2    77.5  rf1     7.3  rf2_splitk     7.9
+  128 x 1 uniform                    groups 7  b2    96.0  rf1     8.4  rf2_splitk     8.4
+  128 x 1 skew_low                   groups 7  b2    95.6  rf1     8.3  rf2_splitk     8.7
+  128 x 1 skew_high                  groups 7  b2    95.8  rf1     8.2  rf2_splitk     8.6
+  512 x 1 uniform                    groups 7  b2   100.6  rf1    12.3  rf2_splitk    12.8
+  512 x 1 skew_low                   groups 7  b2   100.7  rf1    12.3  rf2_splitk    12.9
+  2048 x 1 uniform                   groups 7  b2   143.9  rf1    19.4  rf2_splitk    19.0
+  2048 x 1 skew_low                  groups 7  b2   149.8  rf1    19.7  rf2_splitk    17.9
+  8192 x 1 uniform                   groups 7  b2   301.1  rf1    61.9  rf2_splitk    60.1
+  8192 x 1 skew_low                  groups 7  b2   309.4  rf1    61.7  rf2_splitk    58.5
+  1 x 2048 uniform                   groups 1  b2    69.2  rf1    13.7  rf2_splitk    14.7
+  1 x 2048 skew_low                  groups 1  b2    69.3  rf1    13.6  rf2_splitk    15.0
+  1 x 2048 skew_high                 groups 1  b2    60.6  rf1    15.7  rf2_splitk    16.7
+  4 x 512 uniform                    groups 2  b2    82.0  rf1    13.8  rf2_splitk    14.7
+  4 x 512 skew_low                   groups 1  b2    69.3  rf1    13.8  rf2_splitk    15.0
+  4 x 512 skew_high                  groups 3  b2   102.7  rf1    13.7  rf2_splitk    14.9
+  16 x 128 uniform                   groups 6  b2   129.1  rf1    15.7  rf2_splitk    15.4
+  16 x 128 skew_low                  groups 4  b2   112.5  rf1    13.9  rf2_splitk    15.0
+  16 x 128 skew_high                 groups 5  b2   114.2  rf1    15.4  rf2_splitk    16.0
+  4 x 2048 uniform                   groups 2  b2   265.4  rf1    49.6  rf2_splitk    53.5
+  4 x 2048 skew_low                  groups 1  b2   263.1  rf1    49.2  rf2_splitk    53.7
+  4 x 2048 skew_high                 groups 3  b2   256.9  rf1    50.3  rf2_splitk    54.1
+  8 x 1024 uniform                   groups 4  b2   265.6  rf1    50.5  rf2_splitk    54.0
+  8 x 1024 skew_low                  groups 4  b2   281.5  rf1    50.1  rf2_splitk    54.0
+  8 x 1024 skew_high                 groups 5  b2   264.0  rf1    54.1  rf2_splitk    55.4
+  16 x 512 uniform                   groups 6  b2   286.4  rf1    53.7  rf2_splitk    55.3
+  16 x 512 skew_low                  groups 4  b2   275.8  rf1    50.4  rf2_splitk    54.1
+  16 x 512 skew_high                 groups 5  b2   263.8  rf1    53.8  rf2_splitk    55.7
+
+[tables 08/09] the segment / bucketed RF2 batches
+  15 x 512 @r4 + 1 x 512 @r64        groups 2  b2   272.2  rf1    61.6  rf2_splitk    58.2  rf2_segment    56.4  rf2_bucketed    55.1
+  7 x 1024 @r8 + 1 x 1024 @r64       groups 2  b2   246.3  rf1    61.4  rf2_splitk    59.7  rf2_segment    57.2  rf2_bucketed    55.7
+  31 x 64 @r4 + 1 x 64 @r64          groups 2  b2    83.1  rf1    19.5  rf2_splitk    18.4  rf2_segment    18.0  rf2_bucketed    17.4
+  3 x 2048 @r16 + 1 x 2048 @r64      groups 2  b2   243.2  rf1    61.5  rf2_splitk    60.4  rf2_segment    58.3  rf2_bucketed    57.2
+  mix 1/2/4/8/16/32/64 x 1024        groups 7  b2   267.3  rf1    55.7  rf2_splitk    53.2  rf2_segment    50.9  rf2_bucketed    50.5
+  16 x 512 skew_low                  groups 4  b2   275.3  rf1    50.0  rf2_splitk    54.1  rf2_segment    52.6  rf2_bucketed    51.7
+  16 x 512 uniform                   groups 6  b2   286.0  rf1    54.0  rf2_splitk    55.3  rf2_segment    53.3  rf2_bucketed    53.8
+  32 x 256 skew_low                  groups 7  b2   309.5  rf1    61.8  rf2_splitk    58.0  rf2_segment    55.2  rf2_bucketed    56.1
+  32 x 256 uniform                   groups 7  b2   294.2  rf1    62.1  rf2_splitk    59.8  rf2_segment    57.1  rf2_bucketed    56.8
+  64 x 128 skew_low                  groups 7  b2   307.9  rf1    61.5  rf2_splitk    58.2  rf2_segment    55.2  rf2_bucketed    55.8
+  64 x 128 uniform                   groups 7  b2   300.6  rf1    61.9  rf2_splitk    59.5  rf2_segment    56.0  rf2_bucketed    56.6
+  16 x 128 skew_low                  groups 4  b2   112.5  rf1    13.2  rf2_splitk    14.3  rf2_segment    14.5  rf2_bucketed    14.9
+  16 x 128 uniform                   groups 6  b2   129.8  rf1    15.4  rf2_splitk    15.5  rf2_segment    15.0  rf2_bucketed    17.7
+  8 x 1024 skew_low                  groups 4  b2   281.3  rf1    50.2  rf2_splitk    53.9  rf2_segment    52.4  rf2_bucketed    51.6
+  8 x 1024 uniform                   groups 4  b2   265.2  rf1    50.1  rf2_splitk    53.8  rf2_segment    52.7  rf2_bucketed    51.7
+  32 x 1 skew_low                    groups 7  b2    92.0  rf1     7.3  rf2_splitk     8.2  rf2_segment     7.6  rf2_bucketed     8.6
+  32 x 1 uniform                     groups 7  b2    89.7  rf1     7.3  rf2_splitk     8.2  rf2_segment     7.3  rf2_bucketed     8.7
+  128 x 1 skew_low                   groups 7  b2    94.9  rf1     8.3  rf2_splitk     8.8  rf2_segment     8.1  rf2_bucketed     9.4
+  128 x 1 uniform                    groups 7  b2    97.0  rf1     8.1  rf2_splitk     8.8  rf2_segment     8.3  rf2_bucketed     9.6
+  2048 x 1 skew_low                  groups 7  b2   145.7  rf1    19.5  rf2_splitk    18.1  rf2_segment    19.5  rf2_bucketed    20.8
+  2048 x 1 uniform                   groups 7  b2   140.5  rf1    19.6  rf2_splitk    19.0  rf2_segment    20.6  rf2_bucketed    19.9
+  8192 x 1 skew_low                  groups 7  b2   309.2  rf1    61.8  rf2_splitk    58.6  rf2_segment    62.7  rf2_bucketed    56.4
+  8192 x 1 uniform                   groups 7  b2   300.4  rf1    61.3  rf2_splitk    60.0  rf2_segment    64.0  rf2_bucketed    57.6
+
+wrote /storage/ice1/4/7/psunkad3/rankfuse/logs/b2_grouped_v2.json
+name, clocks.current.sm [MHz], clocks.max.sm [MHz], temperature.gpu, power.draw [W]
+NVIDIA H200, 1980 MHz, 1980 MHz, 35, 123.57 W
+---------------------------------------
+Begin Slurm Epilog: Oct-25-2026 22:47:31
+Job ID:        6594321
+User ID:       psunkad3
+Account:       cse
+Job name:      b2-runs2
+Resources:     cpu=8,gres/gpu:h200=1,mem=64G,node=1
+Rsrc Used:     cput=00:16:56,vmem=0,walltime=00:02:07,mem=2267596K,energy_used=0
+Partition:     ice-gpu
+QOS:           coc-ice
+Nodes:         atl1-1-03-017-30-0
+---------------------------------------

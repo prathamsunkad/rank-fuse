@@ -1,6 +1,6 @@
 """Whole-model forward time of Qwen2.5-0.5B for each LoRA backend (MatLoRA plan, step A3).
 
-Uses bench/model_harness.py: all 168 projections wrapped, backends none / b1 / b3 / rf1 / rf2seg /
+Uses bench/model_harness.py: all 168 projections wrapped, backends none / b1 / b2 / b3 / rf1 / rf2sk / rf2seg /
 rf2bkt / rf2auto. Check every backend first with `python bench/model_harness.py check`.
 
 Workloads (each request has one rank; per-token ranks are set once per forward, outside timing):
@@ -36,7 +36,7 @@ import torch
 import model_harness as mh  # also puts the repo root on sys.path
 from rankfuse.workloads import DISTRIBUTIONS
 
-BACKENDS = ["none", "b1", "b3", "rf1", "rf2seg", "rf2bkt", "rf2auto"]
+BACKENDS = ["none", "b1", "b2", "b3", "rf1", "rf2sk", "rf2seg", "rf2bkt", "rf2auto"]
 MIXES = ["all64", "uniform", "mostlylow", "mostlylow+64"]
 TIERS = mh.TIERS
 
@@ -99,7 +99,7 @@ def run_workload(model, ctx, kind, batch, tokens, mix):
         else:
             prompt = torch.randint(1000, 30000, (batch, 128), generator=gen).cuda()
             step = torch.randint(1000, 30000, (batch, 1), generator=gen).cuda()
-        for backend in BACKENDS:
+        for backend in sorted(BACKENDS, key=lambda b: b == "b2"):  # B2 last: its gathers allocate large temporaries
             ctx.backend = backend
             try:
                 ctx.graphed = False

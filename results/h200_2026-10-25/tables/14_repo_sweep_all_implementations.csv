@@ -1,6 +1,7 @@
 tokens,implementation,graph us,graph timing used,eager us
 1,b1_padded,13.2,graph,86.4
 1,b1_padded_graphed,19.2,eager (graphs itself),16.7
+1,b2_grouped,17.7,graph,142.1
 1,b3_vllm,12.7,graph,484.3
 1,rf1_fused,6.2,graph,108.9
 1,rf2_fused,32.6,graph,118.6
@@ -9,6 +10,7 @@ tokens,implementation,graph us,graph timing used,eager us
 1,rf2_bucketed,6.4,graph,229.3
 16,b1_padded,18.3,graph,89.8
 16,b1_padded_graphed,22.9,eager (graphs itself),23.0
+16,b2_grouped,91.2,graph,525.3
 16,b3_vllm,16.9,graph,480.3
 16,rf1_fused,7.2,graph,109.2
 16,rf2_fused,46.5,graph,144.9
@@ -17,6 +19,7 @@ tokens,implementation,graph us,graph timing used,eager us
 16,rf2_bucketed,7.6,graph,387.6
 32,b1_padded,19.1,graph,90.0
 32,b1_padded_graphed,23.0,eager (graphs itself),22.9
+32,b2_grouped,105.6,graph,605.9
 32,b3_vllm,18.0,graph,485.6
 32,rf1_fused,8.5,graph,110.5
 32,rf2_fused,47.5,graph,147.5
@@ -25,6 +28,7 @@ tokens,implementation,graph us,graph timing used,eager us
 32,rf2_bucketed,8.0,graph,488.8
 128,b1_padded,16.9,graph,87.8
 128,b1_padded_graphed,20.8,eager (graphs itself),21.6
+128,b2_grouped,19.5,graph,148.7
 128,b3_vllm,21.2,graph,478.3
 128,rf1_fused,6.8,graph,110.9
 128,rf2_fused,43.8,graph,139.3
@@ -33,6 +37,7 @@ tokens,implementation,graph us,graph timing used,eager us
 128,rf2_bucketed,6.8,graph,243.2
 2048,b1_padded,29.3,graph,91.3
 2048,b1_padded_graphed,33.2,eager (graphs itself),33.3
+2048,b2_grouped,141.5,graph,530.5
 2048,b3_vllm,58.5,graph,483.6
 2048,rf1_fused,18.4,graph,105.1
 2048,rf2_fused,77.4,graph,168.4
@@ -41,6 +46,7 @@ tokens,implementation,graph us,graph timing used,eager us
 2048,rf2_bucketed,20.3,graph,463.2
 4096,b1_padded,39.1,graph,92.0
 4096,b1_padded_graphed,43.1,eager (graphs itself),44.4
+4096,b2_grouped,212.2,graph,617.9
 4096,b3_vllm,97.4,graph,504.5
 4096,rf1_fused,37.4,graph,112.2
 4096,rf2_fused,111.7,graph,202.9

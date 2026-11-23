@@ -38,10 +38,14 @@ def _grouped_compute(x, lora, groups, out):
     return out
 
 
-@register("b2_grouped")
-def grouped(x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor) -> torch.Tensor:
+@register("b2_grouped", prepare=lambda x, lora, token_ranks: dict(groups=_groups(token_ranks)))
+def grouped(
+    x: torch.Tensor, lora: MatryoshkaLoRA, token_ranks: torch.Tensor,
+    groups: list[tuple[int, torch.Tensor]] | None = None,
+) -> torch.Tensor:
+    """groups: the per-rank index lists, if the scheduler built them (no host sync, capturable)."""
     out = torch.zeros(x.shape[0], lora.h_out, dtype=x.dtype, device=x.device)
-    _grouped_compute(x, lora, _groups(token_ranks), out)
+    _grouped_compute(x, lora, _groups(token_ranks) if groups is None else groups, out)
     return apply_scale(out, lora, token_ranks)
 
 
