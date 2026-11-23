@@ -1,0 +1,57 @@
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+Version 2026.3.0.0 (build 38525999) (public-release)
+==PROF== Connected to process 767222 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_ma_shrink_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_ma_expand_kernel" - 1: 0%....50%....100% - 40 passes
+{"impl": "rf1_ma", "shape": "4096x4096", "num_adapters": 16, "requests": 32, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["meta"], "active_adapters": 11, "distinct_pairs": 28, "tokens_per_active_adapter": 2.909090909090909, "batch_max_rank": 64, "mean_rank": 21.34375, "ideal_bytes": 8519680, "ideal_us": 1.7749333333333333}
+==PROF== Disconnected from process 767222
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/rf1_ma-4096x4096-16-32-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/rf1_ma-4096x4096-16-32-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+Version 2026.3.0.0 (build 38525999) (public-release)
+==PROF== Connected to process 767943 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_ma_shrink_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_ma_expand_kernel" - 1: 0%....50%....100% - 40 passes
+{"impl": "rf1_ma", "shape": "4096x4096", "num_adapters": 16, "requests": 128, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["meta"], "active_adapters": 16, "distinct_pairs": 74, "tokens_per_active_adapter": 8.0, "batch_max_rank": 64, "mean_rank": 17.1328125, "ideal_bytes": 16777216, "ideal_us": 3.4952533333333333}
+==PROF== Disconnected from process 767943
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/rf1_ma-4096x4096-16-128-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/rf1_ma-4096x4096-16-128-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+Version 2026.3.0.0 (build 38525999) (public-release)
+==PROF== Connected to process 768310 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_ma_shrink_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_ma_expand_kernel" - 1: 0%....50%....100% - 40 passes
+{"impl": "rf1_ma", "shape": "down", "num_adapters": 16, "requests": 32, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["meta"], "active_adapters": 11, "distinct_pairs": 28, "tokens_per_active_adapter": 2.909090909090909, "batch_max_rank": 64, "mean_rank": 21.34375, "ideal_bytes": 5863424, "ideal_us": 1.2215466666666668}
+==PROF== Disconnected from process 768310
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/rf1_ma-down-16-32-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/rf1_ma-down-16-32-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+Version 2026.3.0.0 (build 38525999) (public-release)
+==PROF== Connected to process 768684 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_ma_shrink_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_ma_expand_kernel" - 1: 0%....50%....100% - 40 passes
+{"impl": "rf1_ma", "shape": "down", "num_adapters": 16, "requests": 128, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["meta"], "active_adapters": 16, "distinct_pairs": 74, "tokens_per_active_adapter": 8.0, "batch_max_rank": 64, "mean_rank": 17.1328125, "ideal_bytes": 11288576, "ideal_us": 2.351786666666667}
+==PROF== Disconnected from process 768684
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/rf1_ma-down-16-128-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/rf1_ma-down-16-128-1.csv
+CHAIN_DONE

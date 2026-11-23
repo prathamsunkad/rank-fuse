@@ -1,0 +1,29 @@
+# Page-table overhead (bench/run_multi_sweep.py): the RankFuse kernels on the same batches with
+# the weights in dense stacks (identity page table), a contiguous page pool and a shuffled one.
+name: multi-pages
+impls: [rf1_ma, rf2_ma_splitk]
+warmup: 10
+reps: 7
+graph_replays: 20
+flush_l2: true
+shapes:
+  4096x4096: [4096, 4096]
+  q_o: [896, 896]
+  k_v: [896, 128]
+  gate_up: [896, 4864]
+  down: [4864, 896]
+tokens:
+  decode-1: [1, 1]
+  decode-8: [8, 1]
+  decode-32: [32, 1]
+  decode-128: [128, 1]
+  decode-256: [256, 1]
+  prefill-2048: [16, 128]
+  prefill-8192: [32, 256]
+grid:
+  num_adapters: [1, 16, 256]
+  popularity: uniform
+  dist: uniform
+  pages: [dense, contiguous, shuffled]
+  r_max: 64
+  dtype: fp16

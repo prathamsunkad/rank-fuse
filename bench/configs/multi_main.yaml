@@ -1,0 +1,33 @@
+# Stage 2 main sweep (bench/run_multi_sweep.py): every implementation over adapters x popularity x
+# rank mix x tokens, on the 4096 x 4096 test layer and Qwen2.5-0.5B's projections. RankFuse kernels
+# read shuffled page pools; the baselines read their own layouts (dense stacks, vLLM pair copies,
+# S-LoRA pools). stage1_rf1_fused (Stage 1, one adapter, no page table) runs where num_adapters = 1.
+# Prefill: whole prompts, 16 x 128 = 2048 and 32 x 256 = 8192 tokens; S-LoRA serves prompts with a
+# different kernel, so B4 prefill rows measure bgmv itself.
+name: multi-main
+impls: [rf1_ma, rf2_ma_splitk, rf2_ma_segment, rf2_ma_bucketed, b1_multi, b3_multi, b4_multi_copies, b4_multi_shared, stage1_rf1_fused]
+warmup: 10
+reps: 7
+graph_replays: 20
+flush_l2: true
+shapes:            # projection: [h_in, h_out]
+  4096x4096: [4096, 4096]
+  q_o: [896, 896]
+  k_v: [896, 128]
+  gate_up: [896, 4864]
+  down: [4864, 896]
+tokens:            # label: [num_requests, tokens_per_request]
+  decode-1: [1, 1]
+  decode-8: [8, 1]
+  decode-32: [32, 1]
+  decode-128: [128, 1]
+  decode-256: [256, 1]
+  prefill-2048: [16, 128]
+  prefill-8192: [32, 256]
+grid:
+  num_adapters: [1, 4, 16, 64, 256]
+  popularity: [uniform, zipf]
+  dist: [uniform, skew_low, all_max]
+  pages: shuffled
+  r_max: 64
+  dtype: fp16

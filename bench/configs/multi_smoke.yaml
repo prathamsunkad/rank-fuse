@@ -1,0 +1,20 @@
+# Stage 2 smoke test: a few workloads per implementation (bench/run_multi_sweep.py).
+name: multi-smoke
+impls: [rf1_ma, rf2_ma_splitk, rf2_ma_segment, rf2_ma_bucketed, b1_multi, b3_multi, b4_multi_copies, b4_multi_shared, stage1_rf1_fused]
+warmup: 5
+reps: 5
+graph_replays: 10
+flush_l2: true
+shapes:
+  4096x4096: [4096, 4096]
+  down: [4864, 896]
+tokens:            # label: [num_requests, tokens_per_request]
+  decode-32: [32, 1]
+  prefill-2048: [16, 128]
+grid:
+  num_adapters: [1, 16]
+  popularity: uniform
+  dist: uniform
+  pages: shuffled
+  r_max: 64
+  dtype: fp16

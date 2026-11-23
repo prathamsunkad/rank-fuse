@@ -1,0 +1,224 @@
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 698362 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_ma_shrink_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_ma_expand_kernel" - 1: 0%....50%....100% - 40 passes
+{"impl": "rf1_ma", "shape": "4096x4096", "num_adapters": 16, "requests": 32, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["meta"], "active_adapters": 11, "distinct_pairs": 28, "tokens_per_active_adapter": 2.909090909090909, "batch_max_rank": 64, "mean_rank": 21.34375, "ideal_bytes": 8519680, "ideal_us": 1.7749333333333333}
+==PROF== Disconnected from process 698362
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/rf1_ma-4096x4096-16-32-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/rf1_ma-4096x4096-16-32-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 699215 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+Using default LoRA kernel configs
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_lora_shrink_kernel" - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "_lora_expand_kernel" - 2: 0%....50%....100% - 40 passes
+{"impl": "b3_multi", "shape": "4096x4096", "num_adapters": 16, "requests": 32, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["copies", "step"], "active_adapters": 11, "distinct_pairs": 28, "tokens_per_active_adapter": 2.909090909090909, "batch_max_rank": 64, "mean_rank": 21.34375, "ideal_bytes": 8519680, "ideal_us": 1.7749333333333333}
+==PROF== Disconnected from process 699215
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b3_multi-4096x4096-16-32-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b3_multi-4096x4096-16-32-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 700162 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_shrink_k..." - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_expand_k..." - 2: 0%....50%....100% - 40 passes
+{"impl": "b4_multi_copies", "shape": "4096x4096", "num_adapters": 16, "requests": 32, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["pool", "entries", "v"], "active_adapters": 11, "distinct_pairs": 28, "tokens_per_active_adapter": 2.909090909090909, "batch_max_rank": 64, "mean_rank": 21.34375, "ideal_bytes": 8519680, "ideal_us": 1.7749333333333333}
+==PROF== Disconnected from process 700162
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b4_multi_copies-4096x4096-16-32-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b4_multi_copies-4096x4096-16-32-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 703701 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_shrink_k..." - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_expand_k..." - 2: 0%....50%....100% - 40 passes
+{"impl": "b4_multi_shared", "shape": "4096x4096", "num_adapters": 16, "requests": 32, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["pool", "entries", "v"], "active_adapters": 11, "distinct_pairs": 28, "tokens_per_active_adapter": 2.909090909090909, "batch_max_rank": 64, "mean_rank": 21.34375, "ideal_bytes": 8519680, "ideal_us": 1.7749333333333333}
+==PROF== Disconnected from process 703701
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b4_multi_shared-4096x4096-16-32-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b4_multi_shared-4096x4096-16-32-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 704620 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_ma_shrink_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_ma_expand_kernel" - 1: 0%....50%....100% - 40 passes
+{"impl": "rf1_ma", "shape": "4096x4096", "num_adapters": 16, "requests": 128, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["meta"], "active_adapters": 16, "distinct_pairs": 74, "tokens_per_active_adapter": 8.0, "batch_max_rank": 64, "mean_rank": 17.1328125, "ideal_bytes": 16777216, "ideal_us": 3.4952533333333333}
+==PROF== Disconnected from process 704620
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/rf1_ma-4096x4096-16-128-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/rf1_ma-4096x4096-16-128-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 705225 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+Using default LoRA kernel configs
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_lora_shrink_kernel" - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "_lora_expand_kernel" - 2: 0%....50%....100% - 40 passes
+{"impl": "b3_multi", "shape": "4096x4096", "num_adapters": 16, "requests": 128, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["copies", "step"], "active_adapters": 16, "distinct_pairs": 74, "tokens_per_active_adapter": 8.0, "batch_max_rank": 64, "mean_rank": 17.1328125, "ideal_bytes": 16777216, "ideal_us": 3.4952533333333333}
+==PROF== Disconnected from process 705225
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b3_multi-4096x4096-16-128-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b3_multi-4096x4096-16-128-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 706419 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_shrink_k..." - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_expand_k..." - 2: 0%....50%....100% - 40 passes
+{"impl": "b4_multi_copies", "shape": "4096x4096", "num_adapters": 16, "requests": 128, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["pool", "entries", "v"], "active_adapters": 16, "distinct_pairs": 74, "tokens_per_active_adapter": 8.0, "batch_max_rank": 64, "mean_rank": 17.1328125, "ideal_bytes": 16777216, "ideal_us": 3.4952533333333333}
+==PROF== Disconnected from process 706419
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b4_multi_copies-4096x4096-16-128-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b4_multi_copies-4096x4096-16-128-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 707340 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_shrink_k..." - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_expand_k..." - 2: 0%....50%....100% - 40 passes
+{"impl": "b4_multi_shared", "shape": "4096x4096", "num_adapters": 16, "requests": 128, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["pool", "entries", "v"], "active_adapters": 16, "distinct_pairs": 74, "tokens_per_active_adapter": 8.0, "batch_max_rank": 64, "mean_rank": 17.1328125, "ideal_bytes": 16777216, "ideal_us": 3.4952533333333333}
+==PROF== Disconnected from process 707340
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b4_multi_shared-4096x4096-16-128-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b4_multi_shared-4096x4096-16-128-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 708253 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_ma_shrink_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_ma_expand_kernel" - 1: 0%....50%....100% - 40 passes
+{"impl": "rf1_ma", "shape": "down", "num_adapters": 16, "requests": 32, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["meta"], "active_adapters": 11, "distinct_pairs": 28, "tokens_per_active_adapter": 2.909090909090909, "batch_max_rank": 64, "mean_rank": 21.34375, "ideal_bytes": 5863424, "ideal_us": 1.2215466666666668}
+==PROF== Disconnected from process 708253
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/rf1_ma-down-16-32-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/rf1_ma-down-16-32-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 708844 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+Using default LoRA kernel configs
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_lora_shrink_kernel" - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "_lora_expand_kernel" - 2: 0%....50%....100% - 40 passes
+{"impl": "b3_multi", "shape": "down", "num_adapters": 16, "requests": 32, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["copies", "step"], "active_adapters": 11, "distinct_pairs": 28, "tokens_per_active_adapter": 2.909090909090909, "batch_max_rank": 64, "mean_rank": 21.34375, "ideal_bytes": 5863424, "ideal_us": 1.2215466666666668}
+==PROF== Disconnected from process 708844
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b3_multi-down-16-32-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b3_multi-down-16-32-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 709814 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_shrink_k..." - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_expand_k..." - 2: 0%....50%....100% - 40 passes
+{"impl": "b4_multi_copies", "shape": "down", "num_adapters": 16, "requests": 32, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["pool", "entries", "v"], "active_adapters": 11, "distinct_pairs": 28, "tokens_per_active_adapter": 2.909090909090909, "batch_max_rank": 64, "mean_rank": 21.34375, "ideal_bytes": 5863424, "ideal_us": 1.2215466666666668}
+==PROF== Disconnected from process 709814
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b4_multi_copies-down-16-32-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b4_multi_copies-down-16-32-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 710808 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_shrink_k..." - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_expand_k..." - 2: 0%....50%....100% - 40 passes
+{"impl": "b4_multi_shared", "shape": "down", "num_adapters": 16, "requests": 32, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["pool", "entries", "v"], "active_adapters": 11, "distinct_pairs": 28, "tokens_per_active_adapter": 2.909090909090909, "batch_max_rank": 64, "mean_rank": 21.34375, "ideal_bytes": 5863424, "ideal_us": 1.2215466666666668}
+==PROF== Disconnected from process 710808
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b4_multi_shared-down-16-32-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b4_multi_shared-down-16-32-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 711718 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "_ma_shrink_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_ma_expand_kernel" - 1: 0%....50%....100% - 40 passes
+{"impl": "rf1_ma", "shape": "down", "num_adapters": 16, "requests": 128, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["meta"], "active_adapters": 16, "distinct_pairs": 74, "tokens_per_active_adapter": 8.0, "batch_max_rank": 64, "mean_rank": 17.1328125, "ideal_bytes": 11288576, "ideal_us": 2.351786666666667}
+==PROF== Disconnected from process 711718
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/rf1_ma-down-16-128-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/rf1_ma-down-16-128-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 712301 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+Using default LoRA kernel configs
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "_lora_shrink_kernel" - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "_lora_expand_kernel" - 2: 0%....50%....100% - 40 passes
+{"impl": "b3_multi", "shape": "down", "num_adapters": 16, "requests": 128, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["copies", "step"], "active_adapters": 16, "distinct_pairs": 74, "tokens_per_active_adapter": 8.0, "batch_max_rank": 64, "mean_rank": 17.1328125, "ideal_bytes": 11288576, "ideal_us": 2.351786666666667}
+==PROF== Disconnected from process 712301
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b3_multi-down-16-128-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b3_multi-down-16-128-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 713498 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_shrink_k..." - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_expand_k..." - 2: 0%....50%....100% - 40 passes
+{"impl": "b4_multi_copies", "shape": "down", "num_adapters": 16, "requests": 128, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["pool", "entries", "v"], "active_adapters": 16, "distinct_pairs": 74, "tokens_per_active_adapter": 8.0, "batch_max_rank": 64, "mean_rank": 17.1328125, "ideal_bytes": 11288576, "ideal_us": 2.351786666666667}
+==PROF== Disconnected from process 713498
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b4_multi_copies-down-16-128-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b4_multi_copies-down-16-128-1.csv
+
+CondaError: Run 'conda init' before 'conda deactivate'
+
+==PROF== Connected to process 714156 (/storage/ice1/4/7/psunkad3/rankfuse/env/bin/python3.11)
+==WARNING== Unable to access the following 6 metrics: ctc__rx_bytes_data_user.sum, ctc__rx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__rx_bytes_data_user.sum.per_second, ctc__tx_bytes_data_user.sum, ctc__tx_bytes_data_user.sum.pct_of_peak_sustained_elapsed, ctc__tx_bytes_data_user.sum.per_second.
+
+
+==PROF== Profiling "vectorized_elementwise_kernel" - 0: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_shrink_k..." - 1: 0%....50%....100% - 40 passes
+==PROF== Profiling "bgmv_multi_lora_rank_expand_k..." - 2: 0%....50%....100% - 40 passes
+{"impl": "b4_multi_shared", "shape": "down", "num_adapters": 16, "requests": 128, "tokens_per_request": 1, "dist": "uniform", "popularity": "uniform", "pages": "shuffled", "prepared": ["pool", "entries", "v"], "active_adapters": 16, "distinct_pairs": 74, "tokens_per_active_adapter": 8.0, "batch_max_rank": 64, "mean_rank": 17.1328125, "ideal_bytes": 11288576, "ideal_us": 2.351786666666667}
+==PROF== Disconnected from process 714156
+==PROF== Report: /storage/ice1/4/7/psunkad3/rankfuse/rank-fuse/results/h200_2026-11-03_multi/source/ncu/b4_multi_shared-down-16-128-1.ncu-repz
+wrote results/h200_2026-11-03_multi/source/ncu/b4_multi_shared-down-16-128-1.csv

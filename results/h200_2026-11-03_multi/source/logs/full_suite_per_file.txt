@@ -1,0 +1,12 @@
+test_correctness                 passed   935  skipped  29  failed 0
+test_kernel_features             passed    69  skipped   0  failed 0
+test_make_adapters               passed     4  skipped   0  failed 0
+test_multi_correctness           passed  6742  skipped  24  failed 0
+test_multi_graphs                passed    56  skipped   0  failed 0
+test_roofline                    passed     7  skipped   0  failed 0
+test_slora_bgmv                  passed   511  skipped   0  failed 0
+test_vllm_integration            passed     8  skipped   1  failed 0
+test_vllm_integration_launch     passed    52  skipped   0  failed 0
+test_vllm_ops                    passed     5  skipped   0  failed 0
+all: {'passed': 8389, 'skipped': 54}
+excluding test_multi_*: {'passed': 1591, 'skipped': 30}
