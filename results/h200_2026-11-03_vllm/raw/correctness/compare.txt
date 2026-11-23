@@ -1,0 +1,48 @@
+
+=== CUDA graphs on ===
+  stock noise (same engine, batched vs alone): mean |dlp| 0.0329 (adapter), 0.0327 (base); p99 0.159 / 0.148
+  signal: stock matryoshka-0 vs base mean |dlp| 0.222; rank 1 vs rank 64 0.218
+  gate: decisive (top-1 lead >= 0.5) top-1 agreement 100%, mean <= 2.0 x 0.0329, p99 <= 2.0 x 0.159
+  check                                               mean     p99     max   decisive agree   greedy exact/tie/diverged
+  control, stock: adapter batched vs alone          0.0329   0.159   0.377     1889/1889       7/16/ 1   ok
+  base: rankfuse engine vs stock                    0.0000   0.000   0.000     1933/1933      24/ 0/ 0   ok
+  all requests at r_max=64 vs stock matryoshka-0    0.0335   0.162   0.409     1893/1893       8/15/ 1   ok
+  matryoshka_rank None vs stock matryoshka-0        0.0347   0.151   0.443     1893/1893       8/15/ 1   ok
+  rank 1 vs stock matryoshka-0-r1                   0.0336   0.161   0.476     1935/1935      14/10/ 0   ok
+  rank 2 vs stock matryoshka-0-r2                   0.0358   0.162   0.502     1948/1948      18/ 5/ 1   ok
+  rank 4 vs stock matryoshka-0-r4                   0.0347   0.178   0.420     1934/1934      13/10/ 1   ok
+  rank 8 vs stock matryoshka-0-r8                   0.0340   0.164   0.503     1901/1901      14/10/ 0   ok
+  rank 16 vs stock matryoshka-0-r16                 0.0344   0.166   0.390     1909/1909      13/11/ 0   ok
+  rank 32 vs stock matryoshka-0-r32                 0.0345   0.188   0.295     1928/1928      11/12/ 1   ok
+  rank 64 vs stock matryoshka-0-r64                 0.0345   0.161   0.412     1895/1895      11/13/ 0   ok
+  mixed-rank batch vs per-request runs (rankfuse)   0.0325   0.157   0.350     1924/1924      12/12/ 0   ok
+  mixed-rank batch vs stock per-tier adapters       0.0293   0.155   0.437     1924/1924      13/11/ 0   ok
+
+=== CUDA graphs off (enforce_eager) ===
+  stock noise (same engine, batched vs alone): mean |dlp| 0.0363 (adapter), 0.0363 (base); p99 0.171 / 0.174
+  signal: stock matryoshka-0 vs base mean |dlp| 0.211; rank 1 vs rank 64 0.206
+  gate: decisive (top-1 lead >= 0.5) top-1 agreement 100%, mean <= 2.0 x 0.0363, p99 <= 2.0 x 0.174
+  check                                               mean     p99     max   decisive agree   greedy exact/tie/diverged
+  control, stock: adapter batched vs alone          0.0363   0.171   0.337     1884/1884      14/ 9/ 1   ok
+  base: rankfuse engine vs stock                    0.0000   0.000   0.000     1925/1925      21/ 3/ 0   ok
+  all requests at r_max=64 vs stock matryoshka-0    0.0361   0.176   0.446     1907/1907      12/11/ 1   ok
+  matryoshka_rank None vs stock matryoshka-0        0.0361   0.176   0.446     1907/1907      12/11/ 1   ok
+  rank 1 vs stock matryoshka-0-r1                   0.0365   0.176   0.430     1937/1937      13/10/ 1   ok
+  rank 2 vs stock matryoshka-0-r2                   0.0366   0.187   0.333     1950/1950      11/12/ 1   ok
+  rank 4 vs stock matryoshka-0-r4                   0.0373   0.178   0.675     1918/1918      12/10/ 2   ok
+  rank 8 vs stock matryoshka-0-r8                   0.0392   0.275   0.417     1906/1906      15/ 9/ 0   ok
+  rank 16 vs stock matryoshka-0-r16                 0.0417   0.176   0.579     1935/1935      13/10/ 1   ok
+  rank 32 vs stock matryoshka-0-r32                 0.0412   0.274   0.409     1932/1932       9/13/ 2   ok
+  rank 64 vs stock matryoshka-0-r64                 0.0361   0.163   0.446     1913/1913       8/16/ 0   ok
+  mixed-rank batch vs per-request runs (rankfuse)   0.0364   0.186   0.388     1931/1931      10/14/ 0   ok
+  mixed-rank batch vs stock per-tier adapters       0.0321   0.174   0.446     1923/1923      15/ 8/ 1   ok
+
+=== CUDA graphs vs eager, same engine (teacher-forced) ===
+  stock full: graphs vs eager                       0.0569   0.285   1.787     1907/1907      12/11/ 1
+  stock tier8: graphs vs eager                      0.0426   0.320   0.374     1906/1906      11/12/ 1
+  stock base: graphs vs eager                       0.0425   0.237   0.578     1925/1925      14/10/ 0
+  rankfuse full: graphs vs eager                    0.0562   0.380   1.747     1912/1912       9/15/ 0
+  rankfuse tier8: graphs vs eager                   0.0470   0.280   0.675     1899/1899       9/15/ 0
+  rankfuse base: graphs vs eager                    0.0425   0.237   0.578     1925/1925      13/11/ 0
+
+CORRECTNESS GATE PASSED

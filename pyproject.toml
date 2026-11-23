@@ -14,6 +14,10 @@ gpu = ["triton"]
 analysis = ["matplotlib"]
 dev = ["pytest"]
 
+# vLLM loads this in every process; it does nothing unless RANKFUSE_VLLM=1 (rankfuse/integration).
+[project.entry-points."vllm.general_plugins"]
+rankfuse = "rankfuse.integration.vllm_plugin:register"
+
 [tool.setuptools.packages.find]
 include = ["rankfuse*"]
 

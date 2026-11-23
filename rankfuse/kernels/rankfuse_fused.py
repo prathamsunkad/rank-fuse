@@ -123,6 +123,13 @@ CUDA graphs: with r_limit passed, rankfuse_lora makes no host syncs and allocate
 `out` (when not given) and rf2's sort. Call it once before capture so the kernels compile and
 the cached scale and slice tables exist; capture and replay then work.
 
+Host cost per eager call (split-K path). The launch configuration and the compiled kernels are
+cached per call shape (_SplitKPlan, _launch), so a repeated shape skips Triton's Python
+launcher (~70 -> ~24 us per call on an H200 node, r_limit given). RF1Launcher is the serving
+form: checks at setup, r_limit from the caller, a shared workspace and direct launches
+(~14 us per call); its output is bitwise identical to rankfuse_lora's. bench/vllm_rf1_launch.py
+measures both.
+
 =====================================================================================
 6. Important variables
 =====================================================================================
@@ -199,6 +206,8 @@ import functools
 import torch
 import triton
 import triton.language as tl
+from triton import knobs
+from triton.runtime import driver
 
 from rankfuse.interface import MatryoshkaLoRA, register
 from rankfuse.kernels._common import SUPPORTED_DTYPES, check_layout, prepare_r_limit, prepare_rank_order
@@ -639,6 +648,12 @@ def _scale_table(lora: MatryoshkaLoRA, device: torch.device) -> torch.Tensor | N
     return cached[1]
 
 
+def _r_pad(r_limit: int) -> int:
+    """R_PAD: r_limit rounded up to a power of two, at least 16 (triton.next_power_of_2 is a
+    constexpr_function in Triton 3.7 and costs ~2 us per host call)."""
+    return 16 if r_limit <= 16 else 1 << (r_limit - 1).bit_length()
+
+
 def _block_m(num_tokens: int, r_pad: int) -> int:
     # Small token blocks for decode; larger ones for prefill, but keep v [BM, R_PAD] in fp32
     # registers at <= 32 KiB per program.
@@ -666,57 +681,269 @@ def _splitk_shrink_tiles(block_m: int, r_pad: int, elem_size: int, device_index:
     return bh, stages
 
 
+class _SplitKPlan:
+    """Launch configuration of the split-K path (section 8) for one call shape.
+
+    Everything here depends only on the shape key (token count, layer shape, slice layout,
+    r_pad, dtype, add, scale, out's row stride), so it is computed once per key and cached
+    (_SPLITK_PLANS) instead of on every call. The compiled kernels are cached per plan as well,
+    keyed by the argument properties Triton specializes on (see _launch), so a later call
+    launches them directly instead of going through Triton's Python launcher.
+    """
+
+    __slots__ = (
+        "block_m", "m_tiles", "bh", "stages", "tiled", "split_k", "k_per", "ws_numel", "ws_slice",
+        "shrink_grid", "expand_grid", "shrink_consts", "expand_consts", "expand_mid", "expand_warps",
+        "kernels",
+    )
+
+    def __init__(self, num_tokens, h_in, n_slices, r_max, n_max, sizes, r_pad, elem_size, add, has_scale,
+                 out_stride, device_index, split_k):
+        num_sms = _num_sms(device_index)
+        block_m = _block_m(num_tokens, r_pad)
+        m_tiles = triton.cdiv(num_tokens, block_m)
+        bh, stages = _splitk_shrink_tiles(block_m, r_pad, elem_size, device_index)
+        tiled = num_tokens > EXPAND_TILED_MIN_TOKENS
+        if split_k is None:
+            split_k = max(MIN_SPLIT_K_TILED if tiled else 1, min(MAX_SPLIT_K, SPLITK_WAVES * num_sms // (m_tiles * n_slices)))
+        k_per = triton.cdiv(triton.cdiv(h_in, split_k), bh) * bh  # whole BH chunks per slice
+        split_k = triton.cdiv(h_in, k_per)  # no empty slices
+        self.block_m, self.m_tiles, self.bh, self.stages, self.tiled = block_m, m_tiles, bh, stages, tiled
+        self.split_k, self.k_per = split_k, k_per
+        self.ws_slice = split_k * num_tokens * r_pad
+        self.ws_numel = n_slices * self.ws_slice
+        self.shrink_grid = (m_tiles, split_k, n_slices)
+        # Arguments after the tensors and r_limit, in kernel signature order (constexprs last).
+        self.shrink_consts = (k_per, r_max * h_in, self.ws_slice, block_m, bh, r_pad)
+
+        widest = max(sizes)
+        aligned = all(s % 16 == 0 for s in sizes)
+        if tiled:
+            # One tile per program; narrow the tile while B's [R_PAD, BN] tile would take more
+            # than ~35% of shared memory (fp32, r_max 128-256, smaller GPUs).
+            block_n = EXPAND_TILED_BLOCK_N
+            while block_n > 64 and r_pad * block_n * elem_size > 0.35 * _max_shared_mem(device_index):
+                block_n //= 2
+            self.expand_grid = (m_tiles, triton.cdiv(widest, block_n), n_slices)
+            self.expand_mid = ()
+            self.expand_warps = EXPAND_TILED_WARPS
+        else:
+            n_tiles = triton.cdiv(widest, EXPAND_BLOCK_N)
+            n_split = min(n_tiles, max(1, EXPAND_WAVES * num_sms // (m_tiles * n_slices)))
+            cols_per_prog = triton.cdiv(n_tiles, n_split) * EXPAND_BLOCK_N
+            block_n = EXPAND_BLOCK_N
+            self.expand_grid = (m_tiles, triton.cdiv(widest, cols_per_prog), n_slices)
+            self.expand_mid = (cols_per_prog,)
+            self.expand_warps = EXPAND_WARPS
+        self.expand_consts = (split_k, r_max * n_max, self.ws_slice, block_m, block_n, r_pad, has_scale, add, aligned)
+        self.kernels = {}
+
+
+_SPLITK_PLANS: dict[tuple, _SplitKPlan] = {}
+
+
+def _splitk_plan(num_tokens, h_in, n_slices, r_max, n_max, sizes, r_pad, elem_size, add, has_scale,
+                 out_stride, device_index, split_k) -> _SplitKPlan:
+    key = (num_tokens, h_in, n_slices, r_max, n_max, sizes, r_pad, elem_size, add, has_scale, out_stride,
+           device_index, split_k)
+    plan = _SPLITK_PLANS.get(key)
+    if plan is None:
+        plan = _SPLITK_PLANS[key] = _SplitKPlan(*key)
+    return plan
+
+
+def _ptr_bits(*tensors) -> int:
+    """One bit per tensor: is its address 16-byte aligned (Triton's pointer specialization)."""
+    bits = 0
+    for i, t in enumerate(tensors):
+        if t.data_ptr() & 15 == 0:
+            bits |= 1 << i
+    return bits
+
+
+def _launch_hooks_active() -> bool:
+    """True when a Triton launch hook (a profiler such as proton) is installed. Triton 3.7 keeps
+    the hooks in a HookChain that is never None, so an empty chain means no hook."""
+    for hook in (knobs.runtime.launch_enter_hook, knobs.runtime.launch_exit_hook):
+        if hook is not None and getattr(hook, "calls", True):
+            return True
+    return False
+
+
+def _launch(plan, x, A_t, B, token_ranks, out, ws, r_limit, scales, offsets, widths):
+    """Launch the split-K pair of `plan`.
+
+    The first call for a given specialization goes through Triton's normal launcher (which
+    compiles or loads the kernels and launches them) and keeps the returned compiled kernels.
+    Later calls launch those directly: the arguments are exactly the ones Triton would bind
+    (same order, same values), so the kernels, their grids and their results are identical;
+    what is skipped is Triton's per-call argument binding and cache-key computation.
+
+    Triton specializes a compiled kernel on each non-constexpr argument: an int on == 1,
+    % 16 == 0 and its 32/64-bit range, a tensor on its dtype and whether its address is
+    16-byte aligned. All ints except r_limit are fixed by the plan key (and are < 2**31), and
+    the plan key fixes every dtype except token_ranks' and the scale table's, so the cache key
+    below is r_limit's specialization, those two dtypes and the alignment bit of every pointer.
+    """
+    num_tokens, h_in = x.shape
+    n_max = B.shape[2]
+    out_stride = out.stride(0)
+    key = (r_limit == 1, r_limit & 15 == 0, token_ranks.dtype, scales.dtype,
+           _ptr_bits(x, A_t, ws, token_ranks, scales, B, out, offsets, widths))
+    kernels = plan.kernels.get(key)
+    shrink_args = (x, A_t, ws, num_tokens, h_in, r_limit) + plan.shrink_consts
+    expand_args = ((ws, token_ranks, scales, B, out, offsets, widths, num_tokens, n_max, out_stride, r_limit)
+                   + plan.expand_mid + plan.expand_consts)
+    if kernels is None or _launch_hooks_active():
+        # Slow path: Triton's own launcher (also used whenever a profiler hook is installed).
+        shrink = _rf1_shrink_splitk_kernel[plan.shrink_grid](*shrink_args, num_warps=4, num_stages=plan.stages)
+        expand_fn = _rf1_expand_tile_kernel if plan.tiled else _rf1_expand_splitk_kernel
+        expand = expand_fn[plan.expand_grid](*expand_args, num_warps=plan.expand_warps, num_stages=2)
+        if kernels is None:
+            plan.kernels[key] = (shrink, expand)
+        return
+    shrink, expand = kernels
+    device = driver.active.get_current_device()
+    stream = driver.active.get_current_stream(device)
+    g = plan.shrink_grid
+    shrink.run(g[0], g[1], g[2], stream, shrink.function, shrink.packed_metadata, None, None, None, *shrink_args)
+    g = plan.expand_grid
+    expand.run(g[0], g[1], g[2], stream, expand.function, expand.packed_metadata, None, None, None, *expand_args)
+
+
 def _rf1_splitk(x, A_t, B, token_ranks, out, add, sizes, r_limit, r_pad, scale_table, split_k):
     """Section 8: split-K shrink into an fp32 workspace, then sum + mask + scale + expand."""
     num_tokens, h_in = x.shape
     n_slices, r_max, _ = A_t.shape
-    n_max = B.shape[2]
-    device_index = x.device.index or 0
-    num_sms = _num_sms(device_index)
-    block_m = _block_m(num_tokens, r_pad)
-    m_tiles = triton.cdiv(num_tokens, block_m)
-    bh, stages = _splitk_shrink_tiles(block_m, r_pad, x.element_size(), device_index)
-    tiled = num_tokens > EXPAND_TILED_MIN_TOKENS
-    if split_k is None:
-        split_k = max(MIN_SPLIT_K_TILED if tiled else 1, min(MAX_SPLIT_K, SPLITK_WAVES * num_sms // (m_tiles * n_slices)))
-    k_per = triton.cdiv(triton.cdiv(h_in, split_k), bh) * bh  # whole BH chunks per slice
-    split_k = triton.cdiv(h_in, k_per)  # no empty slices
-    ws = torch.empty((n_slices, split_k, num_tokens, r_pad), dtype=torch.float32, device=x.device)
-    ws_slice = split_k * num_tokens * r_pad
-    _rf1_shrink_splitk_kernel[(m_tiles, split_k, n_slices)](
-        x, A_t, ws, num_tokens, h_in, r_limit, k_per, r_max * h_in, ws_slice,
-        BM=block_m, BH=bh, R_PAD=r_pad, num_warps=4, num_stages=stages,
-    )
-
-    widest = max(sizes)
+    plan = _splitk_plan(num_tokens, h_in, n_slices, r_max, B.shape[2], sizes, r_pad, x.element_size(), add,
+                        scale_table is not None, out.stride(0), x.device.index or 0, split_k)
+    ws = torch.empty(plan.ws_numel, dtype=torch.float32, device=x.device)
     offsets, widths = _slice_tables(sizes, x.device)
     # When there is no scale, out stands in for the unused table pointer.
     scales = out if scale_table is None else scale_table
-    aligned = all(s % 16 == 0 for s in sizes)
-    if tiled:
-        # One tile per program; narrow the tile while B's [R_PAD, BN] tile would take more
-        # than ~35% of shared memory (fp32, r_max 128-256, smaller GPUs).
-        block_n = EXPAND_TILED_BLOCK_N
-        while block_n > 64 and r_pad * block_n * x.element_size() > 0.35 * _max_shared_mem(device_index):
-            block_n //= 2
-        _rf1_expand_tile_kernel[(m_tiles, triton.cdiv(widest, block_n), n_slices)](
-            ws, token_ranks, scales, B, out, offsets, widths,
-            num_tokens, n_max, out.stride(0), r_limit, split_k, r_max * n_max, ws_slice,
-            BM=block_m, BN=block_n, R_PAD=r_pad, HAS_SCALE=scale_table is not None, ADD_OUT=add,
-            ALIGNED=aligned, num_warps=EXPAND_TILED_WARPS, num_stages=2,
-        )
-        return out
-
-    n_tiles = triton.cdiv(widest, EXPAND_BLOCK_N)
-    n_split = min(n_tiles, max(1, EXPAND_WAVES * num_sms // (m_tiles * n_slices)))
-    cols_per_prog = triton.cdiv(n_tiles, n_split) * EXPAND_BLOCK_N
-    _rf1_expand_splitk_kernel[(m_tiles, triton.cdiv(widest, cols_per_prog), n_slices)](
-        ws, token_ranks, scales, B, out, offsets, widths,
-        num_tokens, n_max, out.stride(0), r_limit, cols_per_prog, split_k, r_max * n_max, ws_slice,
-        BM=block_m, BN=EXPAND_BLOCK_N, R_PAD=r_pad, HAS_SCALE=scale_table is not None, ADD_OUT=add,
-        ALIGNED=aligned, num_warps=EXPAND_WARPS, num_stages=2,
-    )
+    _launch(plan, x, A_t, B, token_ranks, out, ws, r_limit, scales, offsets, widths)
     return out
+
+
+# ---------------------------------------------------------------------------------------------
+# Serving fast path
+# ---------------------------------------------------------------------------------------------
+
+_WORKSPACES: dict[int, torch.Tensor] = {}
+
+
+def reserve_workspace(device: torch.device, numel: int) -> torch.Tensor:
+    """The fp32 split-K workspace shared by every RF1Launcher on `device`, grown to `numel`.
+
+    Launchers on one device run one after another on one stream, so they can share it. It
+    only grows here, at setup: a launcher never reallocates it during a call, so its address
+    stays fixed once CUDA graphs have been captured.
+    """
+    index = device.index if device.index is not None else torch.cuda.current_device()
+    ws = _WORKSPACES.get(index)
+    if ws is None or ws.numel() < numel:
+        ws = torch.empty(numel, dtype=torch.float32, device=torch.device("cuda", index))
+        _WORKSPACES[index] = ws
+    return ws
+
+
+@functools.lru_cache(maxsize=None)
+def _max_ws_numel(max_tokens, h_in, n_slices, r_max, n_max, sizes, r_pad, elem_size, device_index) -> int:
+    """Largest split-K workspace any token count 1..max_tokens needs (it is not monotonic in T)."""
+    return max(
+        _SplitKPlan(t, h_in, n_slices, r_max, n_max, sizes, r_pad, elem_size, True, False, 0, device_index,
+                    None).ws_numel
+        for t in range(1, max_tokens + 1)
+    )
+
+
+class RF1Launcher:
+    """rankfuse_lora's RF1 split-K path for one adapter's weights, with the per-call host work removed.
+
+        launcher = RF1Launcher(A_t, B, slice_sizes, max_tokens=8192)       # once, at load time
+        launcher(x, token_ranks, out, r_limit=r)                            # every layer call
+
+    Same kernels, launch configuration and arguments as
+    `rankfuse_lora(x, A_t, B, token_ranks, out=out, add=add, slice_sizes=slice_sizes,
+    r_limit=r_limit, scale_table=scale_table)`, so the result is bitwise identical. What
+    changes is the host side of a call:
+
+        checks          A_t, B, slice_sizes and the scale table are checked here, once. A call
+                        trusts its arguments: x [T, h_in] contiguous, out [T, sum(sizes)] with
+                        unit column stride, both of A_t's dtype and on its device; token_ranks
+                        int32/int64 with at least T entries (only the first T are read, so a
+                        server can pass a static per-step buffer without slicing it).
+        r_limit         required (no host sync). It may also be a value read from a CPU tensor
+                        that the server fills per step.
+        launch config   cached per (T, r_pad, add, out row stride) in _SPLITK_PLANS; the slice
+                        tables are built here.
+        workspace       one shared fp32 buffer per device (reserve_workspace), sized here for
+                        max_tokens, instead of torch.empty per call.
+        Triton launch   the compiled kernels are launched directly (_launch).
+
+    Weights are referenced, not copied: a server may update A_t and B in place.
+    r_limit == 0 (no token uses the adapter) launches nothing with add=True and zeroes out
+    with add=False, which is what the kernels would produce.
+    """
+
+    def __init__(self, A_t, B, slice_sizes=None, *, max_tokens: int, scale_table: torch.Tensor | None = None):
+        if A_t.dim() == 2:
+            A_t = A_t.unsqueeze(0)
+        if B.dim() == 2:
+            B = B.unsqueeze(0)
+        n_slices, r_max, h_in = A_t.shape
+        if B.dim() != 3 or B.shape[0] != n_slices or B.shape[1] != r_max:
+            raise ValueError(f"B must be [{n_slices}, {r_max}, n] to match A_t {tuple(A_t.shape)}")
+        n_max = B.shape[2]
+        sizes = tuple(int(s) for s in slice_sizes) if slice_sizes is not None else (n_max,) * n_slices
+        if len(sizes) != n_slices or not all(0 < s <= n_max for s in sizes):
+            raise ValueError(f"slice_sizes must give {n_slices} widths in [1, {n_max}], got {sizes}")
+        if not A_t.is_cuda or A_t.dtype not in SUPPORTED_DTYPES or B.dtype != A_t.dtype or B.device != A_t.device:
+            raise ValueError("A_t and B must be CUDA tensors of one supported floating dtype")
+        if not (A_t.is_contiguous() and B.is_contiguous()):
+            raise ValueError("A_t and B must be contiguous")
+        if scale_table is not None and (
+            scale_table.dtype != torch.float32 or scale_table.device != A_t.device or scale_table.numel() < r_max + 1
+        ):
+            raise ValueError(f"scale_table must be fp32 [{r_max + 1}] on {A_t.device}")
+        if max_tokens < 1:
+            raise ValueError("max_tokens must be >= 1")
+        self.A_t, self.B, self.sizes, self.scale_table = A_t, B, sizes, scale_table
+        self.n_slices, self.r_max, self.h_in, self.n_max = n_slices, r_max, h_in, n_max
+        self.max_tokens = max_tokens
+        self.device_index = A_t.device.index or 0
+        self.elem_size = A_t.element_size()
+        self.r_pad_max = _r_pad(r_max)
+        if self.r_pad_max > MAX_R_PAD:
+            raise ValueError(f"ranks above {MAX_R_PAD} are not supported")
+        self.offsets, self.widths = _slice_tables(sizes, A_t.device)
+        self.ws = reserve_workspace(A_t.device, _max_ws_numel(
+            max_tokens, h_in, n_slices, r_max, n_max, sizes, self.r_pad_max, self.elem_size, self.device_index))
+        self._plans: dict[tuple, _SplitKPlan] = {}
+
+    def __call__(self, x, token_ranks, out, *, r_limit: int, add: bool = True) -> torch.Tensor:
+        num_tokens = x.shape[0]
+        if num_tokens == 0:
+            return out
+        if r_limit <= 0:
+            if not add:
+                out.zero_()
+            return out
+        out_stride = out.stride(0)
+        r_pad = _r_pad(r_limit)
+        pkey = (num_tokens, r_pad, add, out_stride)
+        plan = self._plans.get(pkey)
+        if plan is None:
+            if num_tokens > self.max_tokens or r_limit > self.r_max:
+                raise ValueError(f"T={num_tokens} / r_limit={r_limit} above the launcher's max_tokens / r_max")
+            plan = self._plans[pkey] = _splitk_plan(
+                num_tokens, self.h_in, self.n_slices, self.r_max, self.n_max, self.sizes, r_pad, self.elem_size,
+                add, self.scale_table is not None, out_stride, self.device_index, None)
+            if plan.ws_numel > self.ws.numel():
+                raise RuntimeError("split-K workspace too small (reserve_workspace was not sized for this call)")
+        scales = out if self.scale_table is None else self.scale_table
+        _launch(plan, x, self.A_t, self.B, token_ranks, out, self.ws, r_limit, scales, self.offsets, self.widths)
+        return out
 
 
 def rankfuse_lora(
@@ -791,7 +1018,7 @@ def rankfuse_lora(
             raise ValueError(f"token ranks must be in [0, {r_max}]")
     elif not 0 <= r_limit <= r_max:
         raise ValueError(f"r_limit must be in [0, {r_max}]")
-    r_pad = max(16, triton.next_power_of_2(max(r_limit, 1)))
+    r_pad = _r_pad(r_limit)
     if r_pad > MAX_R_PAD:
         raise ValueError(f"ranks above {MAX_R_PAD} are not supported")
     if not rank_sort and split_k != 0:

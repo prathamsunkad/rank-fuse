@@ -1,0 +1,21 @@
+# Output of scripts/launch_before.py on the H200 node (job 6787847, 2026-11-03 12:15), with
+# rankfuse/kernels/rankfuse_fused.py as in git HEAD (e9e10e8), i.e. before the launch-path change.
+# Host wall time per eager call, us (300 back-to-back calls, one sync, median of 5), fp16, r_max 64:
+#   b1 = B1 body, one call per output slice (b1_1slice = one slice only); rf1 = rankfuse_lora(r_limit=64);
+#   rf1_sync = rankfuse_lora(r_limit=None)
+qkv      T=    1 b1  193.7 b1_1slice   64.4 rf1   71.8 rf1_sync  107.7
+qkv      T=   32 b1  197.7 b1_1slice   65.9 rf1   71.8 rf1_sync  107.3
+qkv      T=  512 b1  197.1 b1_1slice   65.7 rf1   66.4 rf1_sync  102.0
+o        T=    1 b1   63.7 b1_1slice   63.4 rf1   70.0 rf1_sync  105.4
+o        T=   32 b1   64.3 b1_1slice   63.7 rf1   69.9 rf1_sync  105.8
+o        T=  512 b1   64.2 b1_1slice   63.8 rf1   66.0 rf1_sync  101.6
+gate_up  T=    1 b1  130.2 b1_1slice   64.9 rf1   71.3 rf1_sync  106.1
+gate_up  T=   32 b1  131.9 b1_1slice   65.7 rf1   70.7 rf1_sync  106.2
+gate_up  T=  512 b1  132.8 b1_1slice   66.1 rf1   66.1 rf1_sync  102.6
+down     T=    1 b1   65.7 b1_1slice   65.0 rf1   71.0 rf1_sync  106.6
+down     T=   32 b1   66.6 b1_1slice   66.2 rf1   70.5 rf1_sync  106.7
+down     T=  512 b1   66.8 b1_1slice   66.2 rf1   66.0 rf1_sync  102.4
+# cProfile, 2000 calls (qkv, T=8, r_limit given), share of profiled time:
+#   Triton JITFunction.run + its binder/specialization/cache key: ~41% (two launches per call)
+#   rankfuse_lora checks ~9%, _rf1_splitk launch-config math ~9%, torch.empty workspace ~2%,
+#   triton.next_power_of_2 for R_PAD (a constexpr_function in Triton 3.7, ~2 us per host call)

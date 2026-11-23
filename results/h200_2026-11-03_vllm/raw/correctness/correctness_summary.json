@@ -1,0 +1,514 @@
+{
+ "passed": true,
+ "decisive_nats": 0.5,
+ "noise_factor": 2.0,
+ "tie_nats": 0.25,
+ "checks": [
+  {
+   "graphs": "graphs",
+   "label": "control, stock: adapter batched vs alone",
+   "passed": true,
+   "mean": 0.03290040496228957,
+   "p99": 0.15871429443359375,
+   "max": 0.37682437896728516,
+   "positions": 2644,
+   "decisive": 1889,
+   "decisive_agree": 1889,
+   "greedy": {
+    "exact": 7,
+    "tie": 16,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "base: rankfuse engine vs stock",
+   "passed": true,
+   "mean": 0.0,
+   "p99": 0.0,
+   "max": 0.0,
+   "positions": 2644,
+   "decisive": 1933,
+   "decisive_agree": 1933,
+   "greedy": {
+    "exact": 24,
+    "tie": 0,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "all requests at r_max=64 vs stock matryoshka-0",
+   "passed": true,
+   "mean": 0.033480280043863546,
+   "p99": 0.1616518497467041,
+   "max": 0.4092092514038086,
+   "positions": 2644,
+   "decisive": 1893,
+   "decisive_agree": 1893,
+   "greedy": {
+    "exact": 8,
+    "tie": 15,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "matryoshka_rank None vs stock matryoshka-0",
+   "passed": true,
+   "mean": 0.034699821952541905,
+   "p99": 0.15055561065673828,
+   "max": 0.442868709564209,
+   "positions": 2644,
+   "decisive": 1893,
+   "decisive_agree": 1893,
+   "greedy": {
+    "exact": 8,
+    "tie": 15,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "rank 1 vs stock matryoshka-0-r1",
+   "passed": true,
+   "mean": 0.03364845000528921,
+   "p99": 0.16074132919311523,
+   "max": 0.47582483291625977,
+   "positions": 2644,
+   "decisive": 1935,
+   "decisive_agree": 1935,
+   "greedy": {
+    "exact": 14,
+    "tie": 10,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "rank 2 vs stock matryoshka-0-r2",
+   "passed": true,
+   "mean": 0.03584079819729714,
+   "p99": 0.16225099563598633,
+   "max": 0.5024528503417969,
+   "positions": 2644,
+   "decisive": 1948,
+   "decisive_agree": 1948,
+   "greedy": {
+    "exact": 18,
+    "tie": 5,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "rank 4 vs stock matryoshka-0-r4",
+   "passed": true,
+   "mean": 0.03466396163799785,
+   "p99": 0.1783442497253418,
+   "max": 0.42040300369262695,
+   "positions": 2644,
+   "decisive": 1934,
+   "decisive_agree": 1934,
+   "greedy": {
+    "exact": 13,
+    "tie": 10,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "rank 8 vs stock matryoshka-0-r8",
+   "passed": true,
+   "mean": 0.03397304289701499,
+   "p99": 0.16420137882232666,
+   "max": 0.5032529830932617,
+   "positions": 2644,
+   "decisive": 1901,
+   "decisive_agree": 1901,
+   "greedy": {
+    "exact": 14,
+    "tie": 10,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "rank 16 vs stock matryoshka-0-r16",
+   "passed": true,
+   "mean": 0.03442736365241931,
+   "p99": 0.1659698486328125,
+   "max": 0.39040279388427734,
+   "positions": 2644,
+   "decisive": 1909,
+   "decisive_agree": 1909,
+   "greedy": {
+    "exact": 13,
+    "tie": 11,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "rank 32 vs stock matryoshka-0-r32",
+   "passed": true,
+   "mean": 0.03447900001901906,
+   "p99": 0.18821430206298828,
+   "max": 0.2954292297363281,
+   "positions": 2644,
+   "decisive": 1928,
+   "decisive_agree": 1928,
+   "greedy": {
+    "exact": 11,
+    "tie": 12,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "rank 64 vs stock matryoshka-0-r64",
+   "passed": true,
+   "mean": 0.03448421811089183,
+   "p99": 0.1609210968017578,
+   "max": 0.412076473236084,
+   "positions": 2644,
+   "decisive": 1895,
+   "decisive_agree": 1895,
+   "greedy": {
+    "exact": 11,
+    "tie": 13,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "mixed-rank batch vs per-request runs (rankfuse)",
+   "passed": true,
+   "mean": 0.03246049648500283,
+   "p99": 0.15682053565979004,
+   "max": 0.3504972457885742,
+   "positions": 2644,
+   "decisive": 1924,
+   "decisive_agree": 1924,
+   "greedy": {
+    "exact": 12,
+    "tie": 12,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "graphs",
+   "label": "mixed-rank batch vs stock per-tier adapters",
+   "passed": true,
+   "mean": 0.029256599591339725,
+   "p99": 0.1547703742980957,
+   "max": 0.43712520599365234,
+   "positions": 2644,
+   "decisive": 1924,
+   "decisive_agree": 1924,
+   "greedy": {
+    "exact": 13,
+    "tie": 11,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "control, stock: adapter batched vs alone",
+   "passed": true,
+   "mean": 0.03633680305190019,
+   "p99": 0.17139625549316406,
+   "max": 0.3370170593261719,
+   "positions": 2644,
+   "decisive": 1884,
+   "decisive_agree": 1884,
+   "greedy": {
+    "exact": 14,
+    "tie": 9,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "base: rankfuse engine vs stock",
+   "passed": true,
+   "mean": 0.0,
+   "p99": 0.0,
+   "max": 0.0,
+   "positions": 2644,
+   "decisive": 1925,
+   "decisive_agree": 1925,
+   "greedy": {
+    "exact": 21,
+    "tie": 3,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "all requests at r_max=64 vs stock matryoshka-0",
+   "passed": true,
+   "mean": 0.03612370970792679,
+   "p99": 0.17602062225341797,
+   "max": 0.4463658332824707,
+   "positions": 2644,
+   "decisive": 1907,
+   "decisive_agree": 1907,
+   "greedy": {
+    "exact": 12,
+    "tie": 11,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "matryoshka_rank None vs stock matryoshka-0",
+   "passed": true,
+   "mean": 0.03612370970792679,
+   "p99": 0.17602062225341797,
+   "max": 0.4463658332824707,
+   "positions": 2644,
+   "decisive": 1907,
+   "decisive_agree": 1907,
+   "greedy": {
+    "exact": 12,
+    "tie": 11,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "rank 1 vs stock matryoshka-0-r1",
+   "passed": true,
+   "mean": 0.03651475736024654,
+   "p99": 0.1761026382446289,
+   "max": 0.4296379089355469,
+   "positions": 2644,
+   "decisive": 1937,
+   "decisive_agree": 1937,
+   "greedy": {
+    "exact": 13,
+    "tie": 10,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "rank 2 vs stock matryoshka-0-r2",
+   "passed": true,
+   "mean": 0.03655838657717802,
+   "p99": 0.18654048442840576,
+   "max": 0.3334217071533203,
+   "positions": 2644,
+   "decisive": 1950,
+   "decisive_agree": 1950,
+   "greedy": {
+    "exact": 11,
+    "tie": 12,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "rank 4 vs stock matryoshka-0-r4",
+   "passed": true,
+   "mean": 0.037257496765367125,
+   "p99": 0.17845535278320312,
+   "max": 0.6749176979064941,
+   "positions": 2644,
+   "decisive": 1918,
+   "decisive_agree": 1918,
+   "greedy": {
+    "exact": 12,
+    "tie": 10,
+    "diverged": 2
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "rank 8 vs stock matryoshka-0-r8",
+   "passed": true,
+   "mean": 0.03917708063319792,
+   "p99": 0.27521562576293945,
+   "max": 0.41660261154174805,
+   "positions": 2644,
+   "decisive": 1906,
+   "decisive_agree": 1906,
+   "greedy": {
+    "exact": 15,
+    "tie": 9,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "rank 16 vs stock matryoshka-0-r16",
+   "passed": true,
+   "mean": 0.04165325438755803,
+   "p99": 0.17601275444030762,
+   "max": 0.5794796943664551,
+   "positions": 2644,
+   "decisive": 1935,
+   "decisive_agree": 1935,
+   "greedy": {
+    "exact": 13,
+    "tie": 10,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "rank 32 vs stock matryoshka-0-r32",
+   "passed": true,
+   "mean": 0.04115356305467437,
+   "p99": 0.2741880416870117,
+   "max": 0.4087963104248047,
+   "positions": 2644,
+   "decisive": 1932,
+   "decisive_agree": 1932,
+   "greedy": {
+    "exact": 9,
+    "tie": 13,
+    "diverged": 2
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "rank 64 vs stock matryoshka-0-r64",
+   "passed": true,
+   "mean": 0.03612419452027329,
+   "p99": 0.16255521774291992,
+   "max": 0.4463658332824707,
+   "positions": 2644,
+   "decisive": 1913,
+   "decisive_agree": 1913,
+   "greedy": {
+    "exact": 8,
+    "tie": 16,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "mixed-rank batch vs per-request runs (rankfuse)",
+   "passed": true,
+   "mean": 0.03635032770744269,
+   "p99": 0.1864790916442871,
+   "max": 0.3880276679992676,
+   "positions": 2644,
+   "decisive": 1931,
+   "decisive_agree": 1931,
+   "greedy": {
+    "exact": 10,
+    "tie": 14,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "eager",
+   "label": "mixed-rank batch vs stock per-tier adapters",
+   "passed": true,
+   "mean": 0.03212963820011465,
+   "p99": 0.17439043521881104,
+   "max": 0.4463658332824707,
+   "positions": 2644,
+   "decisive": 1923,
+   "decisive_agree": 1923,
+   "greedy": {
+    "exact": 15,
+    "tie": 8,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "graphs-vs-eager",
+   "label": "stock full",
+   "mean": 0.05689455263229407,
+   "p99": 0.2850685119628906,
+   "max": 1.7874021530151367,
+   "positions": 2644,
+   "decisive": 1907,
+   "decisive_agree": 1907,
+   "greedy": {
+    "exact": 12,
+    "tie": 11,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "graphs-vs-eager",
+   "label": "stock tier8",
+   "mean": 0.04259852754208071,
+   "p99": 0.3196868896484375,
+   "max": 0.3739356994628906,
+   "positions": 2644,
+   "decisive": 1906,
+   "decisive_agree": 1906,
+   "greedy": {
+    "exact": 11,
+    "tie": 12,
+    "diverged": 1
+   }
+  },
+  {
+   "graphs": "graphs-vs-eager",
+   "label": "stock base",
+   "mean": 0.04254165091599019,
+   "p99": 0.2372434139251709,
+   "max": 0.5782642364501953,
+   "positions": 2644,
+   "decisive": 1925,
+   "decisive_agree": 1925,
+   "greedy": {
+    "exact": 14,
+    "tie": 10,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "graphs-vs-eager",
+   "label": "rankfuse full",
+   "mean": 0.056245450689402746,
+   "p99": 0.38046836853027344,
+   "max": 1.7465028762817383,
+   "positions": 2644,
+   "decisive": 1912,
+   "decisive_agree": 1912,
+   "greedy": {
+    "exact": 9,
+    "tie": 15,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "graphs-vs-eager",
+   "label": "rankfuse tier8",
+   "mean": 0.04696127426354444,
+   "p99": 0.28005504608154297,
+   "max": 0.6749773025512695,
+   "positions": 2644,
+   "decisive": 1899,
+   "decisive_agree": 1899,
+   "greedy": {
+    "exact": 9,
+    "tie": 15,
+    "diverged": 0
+   }
+  },
+  {
+   "graphs": "graphs-vs-eager",
+   "label": "rankfuse base",
+   "mean": 0.04254165091599019,
+   "p99": 0.2372434139251709,
+   "max": 0.5782642364501953,
+   "positions": 2644,
+   "decisive": 1925,
+   "decisive_agree": 1925,
+   "greedy": {
+    "exact": 13,
+    "tie": 11,
+    "diverged": 0
+   }
+  }
+ ]
+}
