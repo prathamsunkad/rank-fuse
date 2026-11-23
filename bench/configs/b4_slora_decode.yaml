@@ -1,0 +1,22 @@
+# B4: S-LoRA's bgmv kernel (rankfuse/baselines/slora_bgmv.py) against RF1, B3 and B1 at decode.
+# The 4096 x 4096 test layer plus Qwen2.5-0.5B's projections (hidden 896, intermediate 4864,
+# 2 KV heads x 64 = 128). Run with --timing graph.
+name: b4-slora-decode
+impls: [b4_slora_copies, b4_slora_shared, rf1_fused, b3_vllm, b1_padded_graphed]
+timing: graph
+warmup: 20
+reps: 200
+graph_replays: 20
+flush_l2: true
+shapes:            # projection: [h_in, h_out]
+  layer_4096: [4096, 4096]
+  q_o: [896, 896]
+  k_v: [896, 128]
+  gate_up: [896, 4864]
+  down: [4864, 896]
+grid:
+  num_requests: [1, 8, 32, 128, 256]
+  tokens_per_request: 1
+  r_max: 64
+  dist: [uniform, skew_low, all_max]
+  dtype: fp16

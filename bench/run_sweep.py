@@ -40,6 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import rankfuse  # noqa: E402  (registers implementations)
 from rankfuse import roofline  # noqa: E402
 from rankfuse.interface import REGISTRY  # noqa: E402
+from rankfuse.baselines import slora_bgmv  # noqa: E402
 from rankfuse.workloads import Workload, make_batch, make_lora  # noqa: E402
 
 # Which roofline strategy each implementation should be compared against.
@@ -49,6 +50,8 @@ ROOFLINE_STRATEGY = {
     "b2_grouped_graphed": "grouped",
     "b3_vllm": "separate_padded",
     "b4_slora": "separate_true",
+    "b4_slora_copies": "separate_true",  # rows padded to multiples of 8 are not counted
+    "b4_slora_shared": "fused_ideal",  # same stored weights as RankFuse
 }
 DEFAULT_STRATEGY = "fused_ideal"  # RankFuse kernels
 
@@ -173,6 +176,7 @@ def main() -> None:
     timing = a.timing or cfg.get("timing", "eager")
     if timing == "graph" and a.device != "cuda":
         sys.exit("--timing graph needs CUDA")
+    slora_bgmv.enable_if_requested(cfg.get("impls", "all"))  # B4 is registered only on request
     impls = sorted(n for n in REGISTRY if n != "b0_reference") if cfg.get("impls", "all") == "all" else cfg["impls"]
     impls = [n for n in impls if not (REGISTRY[n].requires_cuda and a.device != "cuda")]
     workloads = expand_grid(cfg["grid"], cfg.get("shapes"))

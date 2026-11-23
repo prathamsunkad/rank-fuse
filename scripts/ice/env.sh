@@ -18,6 +18,7 @@ export RF_ENV=${RF_ENV:-$RF_ROOT/env}                        # conda env prefix
 export HF_HOME=${HF_HOME:-$RF_ROOT/hf}                       # model downloads
 export RF_ADAPTERS=${RF_ADAPTERS:-$RF_ROOT/adapters}         # generated Matryoshka adapters
 export TRITON_CACHE_DIR=${TRITON_CACHE_DIR:-$RF_ROOT/cache/triton}
+export TORCH_EXTENSIONS_DIR=${TORCH_EXTENSIONS_DIR:-$RF_ROOT/cache/torch_extensions}   # JIT-built C++/CUDA extensions (B4)
 export PIP_CACHE_DIR=${PIP_CACHE_DIR:-$RF_ROOT/cache/pip}
 export CONDA_PKGS_DIRS=${CONDA_PKGS_DIRS:-$RF_ROOT/cache/conda-pkgs}   # default is ~/.conda/pkgs (home quota)
 export PYTHONNOUSERSITE=1   # ignore packages pip-installed with --user into ~/.local for other projects

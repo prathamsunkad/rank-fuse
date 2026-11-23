@@ -17,6 +17,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from rankfuse.baselines import slora_bgmv  # noqa: E402
 from rankfuse.interface import REGISTRY  # noqa: E402
 from rankfuse.workloads import Workload, make_batch, make_lora  # noqa: E402
 
@@ -29,6 +30,7 @@ def main() -> None:
     a = sys.argv[2:] + defaults[len(sys.argv) - 2:]
     w = Workload(int(a[0]), int(a[1]), h_in=int(a[2]), h_out=int(a[3]), r_max=int(a[4]), dist=a[5], dtype=a[6], seed=0)
     lora, batch = make_lora(w, "cuda"), make_batch(w, "cuda")
+    slora_bgmv.enable_if_requested([name])  # B4 is registered only on request
     impl = REGISTRY[name]
     args = (batch.x, lora, batch.token_ranks)
     kwargs = impl.prepare(*args) if impl.prepare else {}
