@@ -78,6 +78,10 @@ It reads the shared weights once (one matrix), so it has no duplication. Its cos
 add into the output. cuBLAS internally splits the long `h_in` sum of the shrink across programs
 (split-K), which makes B1 fast at small batches.
 
+It masks the activation `v`, not the weights: all requests share one `A_t` and one `B`, so the
+weights can't differ per request within one matmul. Zeroing column k of row t in `v` removes rank
+component k from token t only.
+
 ### 3.3 B3: vLLM's kernels (the Punica design), the way stock vLLM serves Matryoshka
 
 vLLM's LoRA kernels descend from Punica's **SGMV** (segmented gather matrix-vector
@@ -315,7 +319,7 @@ and 256 rows. A token block whose highest rank is 8 runs at bucket 16; one whose
 40 runs at bucket 64. Each bucket is a separately compiled version of the tile code; a runtime
 branch picks one.
 
-### 7.2 First version: sort the tokens (`rf2_fused`, and split-K `rf2_splitk`)
+### 7.2 First version: sort the tokens (`rf2_fused`)
 
 ```
 order = argsort(token ranks)              # tokens of similar rank become neighbours
@@ -327,6 +331,11 @@ write each token's result back to its original row
 
 Measured: no real gain. Reading tokens in sorted order scatters the loads, the sort costs 6–46 µs
 per batch, and most time goes to reading `x` and writing `out`, which do not depend on rank.
+
+A split-K version, `rf2_splitk`, has been removed: on rank-sorted input it forms the same blocks as
+`rf2_segment`, plus a sort and index lookups. Rank order is now the batch's own, given to
+`rf2_segment`. The 25–26 Oct result tables labelled "RF2 sorted", and the "RF2" columns of the A100
+tables, came from that removed kernel.
 
 ### 7.3 Second version: segments without sorting (`rf2_segment`)
 
@@ -427,6 +436,29 @@ Measured results so far:
 | Whole Qwen2.5-0.5B, CUDA graphs | whole forward pass 1.4× faster than with B1 and 1.1–1.3× faster than with vLLM's kernels; LoRA's share of a decode step 25–29% (B1 48–51%, B3 36–45%) |
 | Whole model, eager | RF1 0.80–0.85× of B1, because its Python launch path costs about 108 µs per call |
 
+### 8.1 Roofline worked example (`python -m rankfuse.roofline`)
+
+Weights, for one decode request at each of ranks 4, 8, 16 and 32, h = 4096, fp16
+(`tests/test_roofline.py` checks these numbers):
+
+| Strategy | Weight rows read | Weight data |
+|---|---|---|
+| RankFuse / B1 (shared prefix) | 32 | 0.5 MiB |
+| S-LoRA-style (separate adapters, true ranks) | 4+8+16+32 = 60 | 0.94 MiB |
+| vLLM-style (separate adapters, padded to 32) | 4 × 32 = 128 | 2.0 MiB |
+
+Each token also reads x and reads and writes y: 3 × 4096 × 2 B ≈ 24 KiB, whatever its rank.
+
+* Small batches (a few to tens of tokens): weights dominate, so sharing one copy should show up clearly.
+* Large batches (512 tokens ≈ 12 MiB of x and y traffic): weights are a small share and all
+  strategies converge. The model puts the ideal fused kernel within about 1% of B1.
+* At decode sizes the memory-bound lower bound is about 0.3 µs, roughly 10× less than one kernel
+  launch, so the number of launches can decide results more than bytes or FLOPs do. B2 vs B2g
+  measures this directly.
+
+The modeling assumptions are at the top of `rankfuse/roofline.py`. The vLLM row assumes its kernel
+reads the zero-padded rows.
+
 ---
 
 ## 9. Where this sits in Matryoshka LoRA serving
@@ -506,9 +538,12 @@ comparable to S-LoRA's adapter-scaling results.
 | What | File |
 |---|---|
 | RF1 split-K (`rf1_fused`), RF1 single kernel (`rf1_single`), RF2 sorted single kernel (`rf2_fused`) | `rankfuse/kernels/rankfuse_fused.py` |
-| Sorted split-K RF2 (`rf2_splitk`) | `rankfuse/kernels/rankfuse_rf2_splitk.py` |
-| Segment RF2 (`rf2_segment`) | `rankfuse/kernels/rankfuse_rf2_segment.py` |
-| Bucketed RF2 (`rf2_bucketed`, `use_rf2`) | `rankfuse/kernels/rankfuse_rf2_bucketed.py` |
+| Segment RF2 (`rf2_segment`, `rf2_segment_fw`, `rf2_probe_read`, `rf2_probe_branch`) | `rankfuse/kernels/rankfuse_rf2_segment.py` |
+| Sorted-index RF2 (`rf2_index`, `rf2_index_fw`) | `rankfuse/kernels/rankfuse_rf2_index.py` |
+| Bucketed RF2 (`rf2_bucketed`, `rf2_bucketed_tuned`, `rf2_bucketed_seq`, `use_rf2`) | `rankfuse/kernels/rankfuse_rf2_bucketed.py` |
+| Per-bucket row-range RF2 (`rf2_ranges`, `rf2_ranges_seq`) | `rankfuse/kernels/rankfuse_rf2_ranges.py` |
+| Per-width launch settings (`_config`) and the A100 table | `rankfuse/kernels/rankfuse_fused.py`, `rankfuse/kernels/tuned_a100.py`, `bench/tune_blocks.py` |
+| First RF1 and RF2 kernels (`rf1_masked`, `rf2_ragged`), kept as ablations | `rankfuse/kernels/rankfuse_mask.py`, `rankfuse/kernels/rankfuse_ragged.py` |
 | B0 reference, B1 padded (+ graphed) | `rankfuse/reference.py`, `rankfuse/baselines/padded.py` |
 | B3 (vLLM kernels, padded rank copies, `b3_vllm`) | `rankfuse/baselines/vllm_ops.py` |
 | One-layer sweep (eager or CUDA-graph timing) | `bench/run_sweep.py` |

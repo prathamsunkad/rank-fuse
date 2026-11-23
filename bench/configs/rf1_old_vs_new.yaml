@@ -1,0 +1,18 @@
+# rf1_fused alone, for scripts/phoenix/rf1_old_vs_new.sbatch. Keys the pre-refactor run_sweep also
+# reads, so write mode only. Above 128 tokens: smaller batches are unreliable (L2-flush subtraction).
+name: rf1_old_vs_new
+impls: [rf1_fused]
+timing: graph
+warmup: 10
+reps: 30
+graph_replays: 20
+flush_l2: true
+batches: [[256, 1], [512, 1], [1024, 1], [2048, 1], [4096, 1], [8192, 1], [16, 512], [4, 2048]]
+grid:
+  h_in: 4096
+  h_out: 4096
+  r_max: [64, 128, 256]
+  tiers: pow2
+  dist: [all_min, all_max, uniform]
+  dtype: fp16
+  seed: [0, 1, 2]

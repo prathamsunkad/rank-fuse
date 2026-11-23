@@ -12,7 +12,7 @@ LoRALinear: out = base(x), then the Matryoshka LoRA delta is added into out by o
              (rankfuse/baselines/vllm_ops.py); metadata built once per forward for all layers
     rf1      rf1_fused's split-K path (rankfuse_lora, add=True)
     rf2sk    sorted split-K RF2 (rankfuse_rf2_splitk.py); the stable rank order is built once per forward
-    rf2seg   segment RF2 (rankfuse_rf2_segment.py, contig blocks), add=True
+    rf2seg   segment RF2 (rankfuse_rf2_segment.py), add=True
     rf2bkt   bucketed RF2 (rankfuse_rf2_bucketed.py, per-bucket kernels on concurrent streams)
     rf2auto  per batch, rf2bkt where use_rf2 picks it (only with ctx.graphed), else rf1
 
@@ -63,9 +63,6 @@ class Ctx:
         ranks = torch.tensor(request_ranks, dtype=torch.int32).repeat_interleave(tokens_per_request).to(device)
         self.ranks = ranks
         self.r = int(max(request_ranks))
-        n = ranks.numel()
-        self.bm = seg.block_m_for(n, max(self.r, 1))
-        self.blocks = seg.contig_blocks(n, self.bm, device)
         self.order = torch.argsort(ranks, stable=True)
         if self.copy_of_rank is None:
             self.copy_of_rank = torch.full((self.r_max + 1,), -1, dtype=torch.int32, device=device)
@@ -111,7 +108,7 @@ class LoRALinear(nn.Module):
             elif c.backend == "rf2sk":
                 sk.rf2_splitk(x2, self.A_t, self.B, c.ranks, c.r, order=c.order, out=y, add=True)
             elif c.backend == "rf2seg":
-                seg.rf2_segment(x2, self.A_t, self.B, c.ranks, c.r, c.blocks, c.bm, out=y, add=True)
+                seg.rf2_segment(x2, self.A_t, self.B, c.ranks, c.r, out=y, add=True)
             elif c.backend in ("rf2bkt", "rf2auto"):
                 bkt.rf2_bucketed(x2, self.A_t, self.B, c.ranks, c.plan, out=y, add=True)
             else:

@@ -53,4 +53,5 @@ def prepare_r_limit(x: torch.Tensor, lora, token_ranks: torch.Tensor) -> dict:
 
 def prepare_rank_order(x: torch.Tensor, lora, token_ranks: torch.Tensor) -> dict:
     """Per-step metadata for the sorted RF2 kernels: batch maximum rank and stable rank order."""
-    return dict(prepare_r_limit(x, lora, token_ranks), order=torch.argsort(token_ranks, stable=True))
+    order = torch.argsort(token_ranks, stable=True).to(torch.int32)  # the kernels load int32 indices
+    return dict(prepare_r_limit(x, lora, token_ranks), order=order)

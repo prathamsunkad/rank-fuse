@@ -23,8 +23,19 @@ if HAS_FUSED:
 TOL = {torch.float32: 1e-4, torch.float16: 2e-2}
 KERNELS = pytest.mark.parametrize(
     "kernel",
-    [dict(rank_sort=False), dict(rank_sort=False, split_k=0), dict(rank_sort=True)],
-    ids=["rf1", "rf1_single", "rf2"],
+    [
+        dict(rank_sort=False),
+        dict(rank_sort=False, split_k=0),
+        dict(rank_sort=True),
+        dict(rank_skip=True),
+        dict(rank_skip=True, full_width=True),
+        dict(rank_skip=True, rank_sort=True),
+        dict(rank_skip=True, rank_sort=True, full_width=True),
+        dict(rank_probe=1),
+        dict(rank_probe=2),
+    ],
+    ids=["rf1", "rf1_single", "rf2_fused", "rf2_segment", "rf2_segment_fw", "rf2_index", "rf2_index_fw", "rf2_probe_read",
+         "rf2_probe_branch"],
 )
 DTYPES = pytest.mark.parametrize("dtype", [torch.float32, torch.float16], ids=["fp32", "fp16"])
 
@@ -166,6 +177,9 @@ def test_rf2_precomputed_order():
     with_order = rankfuse_lora(x, A_t, B, ranks, rank_sort=True, order=order)
     without = rankfuse_lora(x, A_t, B, ranks, rank_sort=True)
     torch.testing.assert_close(with_order, without)
+    with_order = rankfuse_lora(x, A_t, B, ranks, rank_sort=True, rank_skip=True, order=order)
+    without = rankfuse_lora(x, A_t, B, ranks, rank_sort=True, rank_skip=True)
+    torch.testing.assert_close(with_order, without)
 
 
 def test_invalid_arguments():
@@ -180,6 +194,14 @@ def test_invalid_arguments():
         rankfuse_lora(x, A_t, B, ranks, slice_sizes=[32, 16], out=torch.empty(8, 40, device="cuda"))
     with pytest.raises(ValueError):
         rankfuse_lora(x, A_t, B, ranks, split_k=-1)
+    with pytest.raises(ValueError):
+        rankfuse_lora(x, A_t, B, ranks, rank_skip=True, split_k=0)  # skipping runs on split-K
+    with pytest.raises(ValueError):
+        rankfuse_lora(x, A_t, B, ranks, full_width=True)  # the control for rank_skip
+    with pytest.raises(ValueError):
+        rankfuse_lora(x, A_t, B, ranks, rank_probe=3)
+    with pytest.raises(ValueError):
+        rankfuse_lora(x, A_t, B, ranks, rank_probe=1, rank_skip=True)
 
 
 @pytest.mark.parametrize("split_k", [1, 2, 3, 7, 64], ids=lambda s: f"S{s}")
@@ -225,7 +247,10 @@ def test_b1_graphed_repeated_replays():
 
 # RF2 variants (rankfuse_rf2_*.py). Their registered wrappers take one adapter; these tests cover
 # add mode, an output column view and graph capture with per-step metadata built before capture.
-RF2_VARIANTS = pytest.mark.parametrize("name", ["rf2_splitk", "rf2_segment", "rf2_bucketed"])
+BUCKETED = ("rf2_bucketed", "rf2_bucketed_tuned", "rf2_bucketed_seq")
+RF2_VARIANTS = pytest.mark.parametrize(
+    "name", ["rf2_segment", "rf2_segment_fw", "rf2_index", "rf2_index_fw", *BUCKETED, "rf2_ranges", "rf2_ranges_seq"]
+)
 
 
 def _rf2_lora(T, h_in, n, r_max, dtype, seed, ranks=None):
@@ -236,13 +261,14 @@ def _rf2_lora(T, h_in, n, r_max, dtype, seed, ranks=None):
 def _rf2_metadata(name, x, token_ranks):
     """What a serving engine would build once per step, outside the graph."""
     r_limit = int(token_ranks.max())
-    if name == "rf2_splitk":
-        return dict(r_limit=r_limit, order=torch.argsort(token_ranks, stable=True))
-    if name == "rf2_segment":
-        from rankfuse.kernels.rankfuse_rf2_segment import block_m_for, contig_blocks
+    if name.startswith("rf2_segment"):
+        return dict(r_limit=r_limit)
+    if name.startswith("rf2_index"):
+        return dict(r_limit=r_limit, order=torch.argsort(token_ranks, stable=True).to(torch.int32))
+    if name.startswith("rf2_ranges"):
+        from rankfuse.kernels.rankfuse_rf2_ranges import RangePlan
 
-        bm = block_m_for(x.shape[0], r_limit)
-        return dict(r_limit=r_limit, blocks=contig_blocks(x.shape[0], bm, x.device), bm=bm)
+        return dict(plan=RangePlan(token_ranks))
     from rankfuse.kernels.rankfuse_rf2_bucketed import Plan
 
     return dict(plan=Plan(token_ranks, x.device))
@@ -267,9 +293,9 @@ def test_rf2_add_into_column_view(name, dtype, T):
 @RF2_VARIANTS
 @pytest.mark.parametrize("T", [29, 300], ids=["decode-29", "prefill-300"])
 def test_rf2_cuda_graph_capture_and_replay(name, T):
-    """Metadata built before capture, no host sync inside: replay on new x. rf2_splitk and
-    rf2_segment are also replayed on new ranks (a stale order or block table stays correct);
-    rf2_bucketed's plan fixes the ranks, so it is replayed on the same ones."""
+    """Metadata built before capture, no host sync inside: replay on new x. rf2_segment
+    is also replayed on new ranks; rf2_bucketed's plan and rf2_index's order fix the ranks, so they
+    are replayed on the same ones."""
     x, lora, token_ranks = _rf2_lora(T, 128, 96, 32, torch.float32, seed=14)
     meta = _rf2_metadata(name, x, token_ranks)
     out = torch.empty(T, 96, device="cuda")
@@ -288,7 +314,7 @@ def test_rf2_cuda_graph_capture_and_replay(name, T):
 
     x2, _, ranks2 = _rf2_lora(T, 128, 96, 32, torch.float32, seed=15)
     x.copy_(x2)
-    if name != "rf2_bucketed":
+    if name.startswith("rf2_segment"):
         token_ranks.copy_(ranks2)
     graph.replay()
     torch.cuda.synchronize()
@@ -301,13 +327,115 @@ def test_rf2_bucketed_sequential_matches_concurrent():
     torch.testing.assert_close(impl(x, lora, token_ranks, concurrent=False), impl(x, lora, token_ranks))
 
 
-def test_rf2_segment_aligned_blocks():
-    """Blocks that never cross a request (aligned_blocks) give the same result as contig blocks."""
-    from rankfuse.kernels.rankfuse_rf2_segment import aligned_blocks
+def test_rf2_bucketed_slices():
+    """Fused q/k/v-style projection on the bucketed launch path, above and below 128 tokens."""
+    from rankfuse.kernels.rankfuse_rf2_bucketed import Plan, rf2_bucketed
 
-    seg_lens, seg_ranks = [70, 5, 130, 1], [8, 64, 2, 32]
-    ranks = [r for n, r in zip(seg_lens, seg_ranks) for _ in range(n)]
-    x, lora, token_ranks = _rf2_lora(len(ranks), 128, 96, 64, torch.float32, seed=17, ranks=ranks)
-    blocks = aligned_blocks(seg_lens, 64, x.device)
-    out = REGISTRY["rf2_segment"](x, lora, token_ranks, r_limit=64, blocks=blocks, bm=64)
+    sizes = [128, 32, 32]
+    for T, tuned in [(53, False), (300, False), (300, True)]:
+        x, A_t, B, ranks = _inputs(T, 160, sizes, 32, torch.float16, seed=17)
+        out = rf2_bucketed(x, A_t, B, ranks, Plan(ranks, x.device), tuned=tuned, slice_sizes=sizes)
+        _assert_close(out, _reference(x, A_t, B, ranks, sizes), torch.float16)
+
+
+@pytest.mark.parametrize("T", [29, 300], ids=["decode-29", "prefill-300"])
+@pytest.mark.parametrize("r_max", [64, 128, 256], ids=["r64", "r128", "r256"])
+def test_full_width_control_matches(T, r_max):
+    """The control and rank skipping use different widths but must give the same delta."""
+    x, A_t, B, ranks = _inputs(T, 384, [320], r_max, torch.float32, seed=18)
+    skipped = rankfuse_lora(x, A_t, B, ranks, rank_skip=True)
+    full = rankfuse_lora(x, A_t, B, ranks, rank_skip=True, full_width=True)
+    torch.testing.assert_close(skipped, full, rtol=1e-4, atol=1e-4)
+    _assert_close(skipped, _reference(x, A_t, B, ranks, [320]), torch.float32)
+
+
+def test_sorted_batch_preserves_requests():
+    """A physically rank-ordered batch gives each token the same delta as in its original order."""
+    from rankfuse.workloads import Workload, make_batch, make_lora
+
+    w = Workload(8, 1, h_in=128, h_out=96, r_max=32, dtype="fp32", lengths="serving_2", request_order="sorted", seed=3)
+    lora, batch = make_lora(w, "cuda"), make_batch(w, "cuda")
+    assert batch.token_ranks.tolist() == sorted(batch.token_ranks.tolist())
+    got = REGISTRY["rf2_segment"](batch.x, lora, batch.token_ranks)
+    _assert_close(got, REGISTRY["b0_reference"](batch.x, lora, batch.token_ranks), torch.float32)
+
+
+# rf2_ranges: per-bucket launches over the contiguous rows of a rank-sorted batch.
+def test_range_plan_runs():
+    """Sorted ranks give one run per bucket (heaviest first) and rank-0 rows as zero runs;
+    unsorted ranks fall back to one run at the batch's bucket."""
+    from rankfuse.kernels.rankfuse_rf2_ranges import RangePlan
+
+    plan = RangePlan([0, 0, 3, 16, 17, 30, 200])
+    assert plan.sorted and plan.zero_runs == [(0, 2)]
+    assert sorted(plan.runs) == [(16, 2, 4, 16), (32, 4, 6, 30), (256, 6, 7, 200)]
+    assert plan.runs[0][0] == 256  # 1 row x 256 is heavier than 2 rows x 32 or x 16
+    unsorted = RangePlan([4, 200, 4, 0])
+    assert not unsorted.sorted and unsorted.zero_runs == [] and unsorted.runs == [(256, 0, 4, 200)]
+    assert RangePlan([0, 0]).runs == [] and RangePlan([]).runs == []
+
+
+@pytest.mark.parametrize("name", ["rf2_ranges", "rf2_ranges_seq"])
+@pytest.mark.parametrize("add", [False, True], ids=["write", "add"])
+@pytest.mark.parametrize("T", [37, 300, 1100], ids=["decode-37", "prefill-300", "prefill-1100"])
+def test_rf2_ranges_sorted(name, add, T):
+    """Sorted batch spanning every bucket, rank-0 rows first, r_max 200 (not a power of two, so the
+    256 bucket must stop at row 200): matches B0 in write and add mode."""
+    ranks = sorted([0, 1, 9, 16, 20, 40, 64, 100, 128, 150, 200][i % 11] for i in range(T))
+    x, lora, token_ranks = _rf2_lora(T, 256, 192, 200, torch.float16, seed=21, ranks=ranks)
+    out = torch.randn(T, 192, device="cuda", dtype=torch.float16)
+    before = out.clone()
+    REGISTRY[name](x, lora, token_ranks, out=out, add=add)
+    expected = REGISTRY["b0_reference"](x, lora, token_ranks).float()
+    if add:
+        expected = expected + before.float()
+    _assert_close(out, expected, torch.float16)
+
+
+def test_rf2_ranges_sorted_graph_capture():
+    """Concurrent per-bucket launches (forked streams) captured in one graph and replayed on new x."""
+    from rankfuse.kernels.rankfuse_rf2_ranges import RangePlan
+
+    T = 300
+    ranks = sorted([0, 4, 20, 50, 100, 256][i % 6] for i in range(T))
+    x, lora, token_ranks = _rf2_lora(T, 256, 128, 256, torch.float32, seed=22, ranks=ranks)
+    plan = RangePlan(token_ranks)
+    assert plan.sorted and len(plan.runs) == 5
+    out = torch.empty(T, 128, device="cuda")
+
+    def run():
+        REGISTRY["rf2_ranges"](x, lora, token_ranks, out=out, plan=plan)
+
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        run()
+    torch.cuda.current_stream().wait_stream(stream)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        run()
+    x.copy_(_rf2_lora(T, 256, 128, 256, torch.float32, seed=23, ranks=ranks)[0])
+    graph.replay()
+    torch.cuda.synchronize()
     _assert_close(out, REGISTRY["b0_reference"](x, lora, token_ranks), torch.float32)
+
+
+@pytest.mark.parametrize("name", ["rf1_fused", "rf2_segment", "rf2_index", "rf2_ranges", "rf2_bucketed", "rf2_bucketed_tuned"])
+@pytest.mark.parametrize("loop_expand", [False, True])
+def test_tuned_table_entries(monkeypatch, name, loop_expand):
+    """A table entry for every width (tiled or loop expand, non-default warps and tiles) is applied
+    and still matches B0, on a sorted mixed-rank prefill batch in add mode."""
+    from rankfuse.kernels import rankfuse_fused as rf
+
+    T = 300
+    entry = dict(bm=32, shrink_warps=8, bh=64, stages=2, bn=128, expand_warps=4, loop_expand=loop_expand)
+    table = {(w, rf._token_range(T)): entry for w in (16, 32, 64, 128, 256)}
+    monkeypatch.setattr(rf, "TUNED", table)
+    monkeypatch.setattr(rf, "TUNED_GPU", torch.cuda.get_device_name(0))
+    assert rf._config(256, T)["tiled"] is (not loop_expand)
+    ranks = sorted([0, 3, 20, 50, 100, 200][i % 6] for i in range(T))
+    x, lora, token_ranks = _rf2_lora(T, 256, 192, 200, torch.float16, seed=23, ranks=ranks)
+    out = torch.randn(T, 192, device="cuda", dtype=torch.float16)
+    expected = REGISTRY["b0_reference"](x, lora, token_ranks).float() + out.float()
+    REGISTRY[name](x, lora, token_ranks, out=out, add=True)
+    _assert_close(out, expected, torch.float16)

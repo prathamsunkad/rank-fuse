@@ -4,7 +4,7 @@ Run before benchmarking to predict where RankFuse can win:
 
     python -m rankfuse.roofline --h 4096 --ranks 4 8 16 32 --tokens-per-request 1
 
-Modeling assumptions (keep in sync with docs/PLAN.md):
+Modeling assumptions (keep in sync with docs/ALGORITHMS.md, section 8.1):
 * y is accumulated (y += delta): output costs a read and a write of T x h_out.
 * Unfused strategies write the intermediate v [T, r] to HBM and read it back. The padded
   baseline also pays one extra read+write of v for the mask.
