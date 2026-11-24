@@ -62,6 +62,8 @@ captured graph replays any later step of the same T after `meta.load_(new_meta)`
 
 from __future__ import annotations
 
+import os
+
 import torch
 import triton
 import triton.language as tl
@@ -400,6 +402,24 @@ def multi_lora(x: torch.Tensor, W: PagedWeights, token_ranks: torch.Tensor, meta
 # RF1-MA on the shared split-K kernels (rankfuse_fused.py, MULTI mode, section 9)
 # ------------------------------------------------------------------------------------------------
 
+# Launch settings of the multi mode. Default: the legacy kernels' settings (rankfuse_fused's default rules,
+# no tuned table). rankfuse_fused.TUNED (tuned_a100.py, on the A100 80GB PCIe) was tuned on single-adapter
+# token blocks, so it is only used by the *_tunedcfg variants, or for every variant with
+# RANKFUSE_MULTI_TUNED=1, until A100 timings show where it helps multi tiles.
+MULTI_TUNED = os.environ.get("RANKFUSE_MULTI_TUNED", "0") == "1"
+
+
+def multi_config(width: int, T: int, dev: int, bm: int, bn: int | None = None, tuned: bool | None = None) -> dict:
+    """Launch settings for multi tiles of bm tokens at `width` rank rows (keys as rankfuse_fused._config). The
+    token block is always bm (the tile table holds at most bm tokens per tile)."""
+    if MULTI_TUNED if tuned is None else tuned:
+        cfg = dict(rf._config(width, T, dev, bm=bm, bn=bn))
+        cfg["bm"] = bm
+        return cfg
+    return dict(bm=bm, shrink_warps=4, bh=None, stages=None, bn=bn, expand_warps=None, loop_expand=False,
+                tiled=T > rf.EXPAND_TILED_MIN_TOKENS)
+
+
 # Apply the many-adapter split-K rule above (MULTI_SPLITK_*) on top of rankfuse_fused._split_count.
 # Fitted on the H200 for the legacy kernels; kept until the A100 sweep shows where it helps.
 MULTI_SPLIT_RULE = True
@@ -425,11 +445,12 @@ def multi_split_k(h_in: int, T: int, tiled: bool, programs: int, num_sms: int) -
 def multi_lora_splitk(x: torch.Tensor, W: PagedWeights, token_ranks: torch.Tensor, meta: MultiMeta, *,
                       out: torch.Tensor | None = None, add: bool = False, rank_skip: bool = False,
                       full_width: bool = False, full_rows: bool = False, split_k: int | None = None,
-                      table_width: bool = False) -> torch.Tensor:
+                      table_width: bool = False, tuned: bool | None = None) -> torch.Tensor:
     """out (+)= the multi-adapter delta over meta's tile table, on rankfuse_fused.splitk_pass (MULTI).
 
-    Launch settings: _config at meta.r_pad (warps, BH, stages, tiled-expand BN / warps, column-loop
-    expand); the token block is meta.bm, since the tile table holds at most bm tokens per tile.
+    Launch settings: multi_config at meta.r_pad (the legacy settings; with tuned=True, or
+    RANKFUSE_MULTI_TUNED=1, _config's tuned settings); the token block is meta.bm, since the tile table
+    holds at most bm tokens per tile.
     Every tile reads its tokens' ranks from token_ranks when it runs (also at CUDA-graph replay) and
     loads only rank rows below their maximum (fewer bytes). rank_skip: each tile also runs at that
     maximum's width bucket (RF2-MA: less MMA work). full_width: every tile at meta.r_pad through the
@@ -452,7 +473,7 @@ def multi_lora_splitk(x: torch.Tensor, W: PagedWeights, token_ranks: torch.Tenso
     dev = x.device.index or 0
     num_sms = rf._num_sms(dev)
     S, cap, bm, R = W.n_slices, meta.capacity, meta.bm, meta.r_pad
-    cfg = rf._config(R, T, dev, bm=bm)
+    cfg = multi_config(R, T, dev, bm, tuned=tuned)
     bh, stages = rf._splitk_shrink_tiles(bm, R, x.element_size(), dev, cfg["bh"], cfg["stages"])
     tiled = cfg["tiled"]
     if split_k is None:
@@ -467,7 +488,7 @@ def multi_lora_splitk(x: torch.Tensor, W: PagedWeights, token_ranks: torch.Tenso
 
 
 def multi_lora_bucketed_splitk(x, W: PagedWeights, token_ranks, plan: "BucketPlan", *, out=None, add=False,
-                               concurrent=True, table_width: bool = False):
+                               concurrent=True, table_width: bool = False, tuned: bool | None = None):
     """RF2-MA, per-width group launches (rf2_bucketed_tuned's strategy) on the shared kernels (MULTI).
 
     One splitk_pass per rank bucket R present, at exactly R rank rows (no runtime branch), over that
@@ -489,7 +510,7 @@ def multi_lora_bucketed_splitk(x, W: PagedWeights, token_ranks, plan: "BucketPla
     S, elem = W.n_slices, x.element_size()
     groups = []
     for b in plan.buckets:  # heaviest first
-        cfg = rf._config(b["R"], T, dev, bm=b["bm"], bn=256 if b["bm"] <= 64 else 128)
+        cfg = multi_config(b["R"], T, dev, b["bm"], bn=256 if b["bm"] <= 64 else 128, tuned=tuned)
         bh, stages = rf._splitk_shrink_tiles(b["bm"], b["R"], elem, dev, cfg["bh"], cfg["stages"])
         groups.append((b, cfg, bh, stages))
     grid_tiles = sum(b["cap"] for b in plan.buckets)
@@ -655,6 +676,14 @@ def _meta_impl(mode: str, doc: str):
     return fn, prepare
 
 
+@register_multi("rf1_ma_tunedcfg", prepare=_meta_prepare("group"))
+def rf1_ma_tunedcfg(x, W, token_adapter, token_ranks, meta: MultiMeta | None = None, out=None, add=False):
+    """rf1_ma with rankfuse_fused._config's settings (the tuned table where it applies)."""
+    if meta is None:
+        meta = _meta_prepare("group")(x, W, token_adapter, token_ranks)["meta"]
+    return multi_lora_splitk(x, W, token_ranks, meta, out=out, add=add, tuned=True)
+
+
 @register_multi("rf1_ma_table", prepare=_meta_prepare("group"))
 def rf1_ma_table(x, W, token_adapter, token_ranks, meta: MultiMeta | None = None, out=None, add=False):
     """rf1_ma with each tile's rank rows masked at the tile table's limit (its group's maximum rank) instead
@@ -673,14 +702,15 @@ def rf1_ma(x, W, token_adapter, token_ranks, meta: MultiMeta | None = None, out=
     return multi_lora_splitk(x, W, token_ranks, meta, out=out, add=add)
 
 
-def _skip_impl(mode: str, full_width: bool, doc: str, full_rows: bool = False, table_width: bool = False):
+def _skip_impl(mode: str, full_width: bool, doc: str, full_rows: bool = False, table_width: bool = False,
+               tuned: bool | None = None):
     prepare = _meta_prepare(mode)
 
     def fn(x, W, token_adapter, token_ranks, meta: MultiMeta | None = None, out=None, add=False):
         if meta is None:
             meta = prepare(x, W, token_adapter, token_ranks)["meta"]
         return multi_lora_splitk(x, W, token_ranks, meta, out=out, add=add, rank_skip=True, full_width=full_width,
-                                 full_rows=full_rows, table_width=table_width)
+                                 full_rows=full_rows, table_width=table_width, tuned=tuned)
 
     fn.__doc__ = doc
     return fn, prepare
@@ -702,6 +732,10 @@ _fn, _prep = _skip_impl("rank_sorted", False, "rf2_ma_splitk with each tile's wi
                         "column instead of its tokens' ranks (follows rank changes only through MultiMeta.load_).",
                         table_width=True)
 register_multi("rf2_ma_splitk_table", prepare=_prep)(_fn)
+
+_fn, _prep = _skip_impl("rank_sorted", False, "rf2_ma_splitk with rankfuse_fused._config's settings (tuned table).",
+                        tuned=True)
+register_multi("rf2_ma_splitk_tunedcfg", prepare=_prep)(_fn)
 
 _fn, _prep = _skip_impl("rank_sorted", True, "rf2_ma_splitk's binary with no skipping at all: every tile at the batch width "
                         "and every rank row loaded (the control for bytes vs MMA; needs every page resident).", full_rows=True)
@@ -746,6 +780,14 @@ def rf2_ma_bucketed_table(x, W, token_adapter, token_ranks, plan: BucketPlan | N
     if plan is None:
         plan = _bucketed_prepare(x, W, token_adapter, token_ranks)["plan"]
     return multi_lora_bucketed_splitk(x, W, token_ranks, plan, out=out, add=add, table_width=True)
+
+
+@register_multi("rf2_ma_bucketed_tunedcfg", prepare=_bucketed_prepare)
+def rf2_ma_bucketed_tunedcfg(x, W, token_adapter, token_ranks, plan: BucketPlan | None = None, out=None, add=False):
+    """rf2_ma_bucketed with rankfuse_fused._config's settings per width (tuned table)."""
+    if plan is None:
+        plan = _bucketed_prepare(x, W, token_adapter, token_ranks)["plan"]
+    return multi_lora_bucketed_splitk(x, W, token_ranks, plan, out=out, add=add, tuned=True)
 
 
 @register_multi("rf2_ma_bucketed_legacy", prepare=_bucketed_prepare)
