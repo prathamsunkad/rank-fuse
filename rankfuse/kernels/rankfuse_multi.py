@@ -4,8 +4,10 @@ For every token t with adapter a_t and rank r_t (rankfuse/multi.py):
 
     y[t, slice s] = scale(a_t, r_t) * x[t] @ A[a_t, s, :r_t].T @ B[a_t, s, :r_t]
 
-Every implementation here is rf1_fused's split-K design (rankfuse_fused.py, section 8) run over a
-tile table instead of fixed token blocks:
+rf1_ma, rf2_ma_splitk(_fw), rf2_ma_widths, rf2_ma_segment and rf2_ma_bucketed(_seq) run on the
+shared split-K kernels themselves (rankfuse_fused.py, MULTI mode, section 9; multi_lora_splitk and
+multi_lora_bucketed_splitk below). The *_legacy implementations use this module's own kernel pair, rf1_fused's split-K design (rankfuse_fused.py, section 8) run over a tile table
+instead of fixed token blocks:
 
     shrink  grid (capacity, S_k, n_slices): program (i, k, s) takes tile i = (adapter, first
             position, length, rank limit) from the per-step metadata, gathers its tokens through
@@ -395,6 +397,124 @@ def multi_lora(x: torch.Tensor, W: PagedWeights, token_ranks: torch.Tensor, meta
 
 
 # ------------------------------------------------------------------------------------------------
+# RF1-MA on the shared split-K kernels (rankfuse_fused.py, MULTI mode, section 9)
+# ------------------------------------------------------------------------------------------------
+
+# Apply the many-adapter split-K rule above (MULTI_SPLITK_*) on top of rankfuse_fused._split_count.
+# Fitted on the H200 for the legacy kernels; kept until the A100 sweep shows where it helps.
+MULTI_SPLIT_RULE = True
+
+
+def multi_tiles(W: PagedWeights, tiles: torch.Tensor, order: torch.Tensor) -> rf.MultiTiles:
+    """A tile table, its token order and the weight layout, as splitk_pass's multi mode takes them."""
+    return rf.MultiTiles(
+        tiles=tiles, order=order, page_table=W.page_table, slice_table=W.slice_table(),
+        pt_ld=W.page_table.shape[1], frame_a=W.frame_stride_a, frame_b=W.frame_stride_b, scale_ld=W.r_max + 1,
+        n_slices=W.n_slices, aligned=W.aligned(), off64=max(W.A_pool.numel(), W.B_pool.numel()) >= 2**31,
+    )
+
+
+def multi_split_k(h_in: int, T: int, tiled: bool, programs: int, num_sms: int) -> int | None:
+    """The slice count the many-adapter rule asks for, or None to leave it to _split_count."""
+    if not (MULTI_SPLIT_RULE and h_in >= MULTI_SPLITK_MIN_H and T <= MULTI_SPLITK_MAX_T):
+        return None
+    base = max(rf.MIN_SPLIT_K_TILED if tiled else 1, min(rf.MAX_SPLIT_K, rf.SPLITK_WAVES * num_sms // max(programs, 1)))
+    return max(base, min(MULTI_MAX_SPLIT_K, MULTI_SPLITK_WAVES * num_sms // max(programs, 1)))
+
+
+def multi_lora_splitk(x: torch.Tensor, W: PagedWeights, token_ranks: torch.Tensor, meta: MultiMeta, *,
+                      out: torch.Tensor | None = None, add: bool = False, rank_skip: bool = False,
+                      full_width: bool = False, split_k: int | None = None) -> torch.Tensor:
+    """out (+)= the multi-adapter delta over meta's tile table, on rankfuse_fused.splitk_pass (MULTI).
+
+    Launch settings: _config at meta.r_pad (warps, BH, stages, tiled-expand BN / warps, column-loop
+    expand); the token block is meta.bm, since the tile table holds at most bm tokens per tile.
+    rank_skip: each tile branches to its own width bucket (RF2-MA); full_width: every tile at
+    meta.r_pad through the same binary (the control for rank_skip).
+    """
+    _check(x, W, token_ranks)
+    out = output_buffer(x, W, out, add)
+    T, h_in = x.shape
+    if T == 0:
+        return out
+    if meta.T != T:
+        raise ValueError(f"metadata built for {meta.T} tokens, x has {T}")
+    if full_width and not rank_skip:
+        raise ValueError("full_width is the control for rank_skip; it needs rank_skip=True")
+    dev = x.device.index or 0
+    num_sms = rf._num_sms(dev)
+    S, cap, bm, R = W.n_slices, meta.capacity, meta.bm, meta.r_pad
+    cfg = rf._config(R, T, dev, bm=bm)
+    bh, stages = rf._splitk_shrink_tiles(bm, R, x.element_size(), dev, cfg["bh"], cfg["stages"])
+    tiled = cfg["tiled"]
+    if split_k is None:
+        split_k = multi_split_k(h_in, T, tiled, cap * S, num_sms)
+    split_k, k_per = rf._split_count(h_in, tiled, cap, S, num_sms, bh, split_k)
+    ws = torch.empty((S, split_k, T, R), dtype=torch.float32, device=x.device)
+    return rf.splitk_pass(x, W.A_pool, W.B_pool, token_ranks, out, add, W.slice_sizes, W.scale_table, ws, R, R, split_k,
+                          k_per, bm, bh, stages, rank_skip=rank_skip, force_rank=R if full_width else 0,
+                          block_n=cfg["bn"], shrink_warps=cfg["shrink_warps"], expand_warps=cfg["expand_warps"],
+                          tiled=tiled, multi=multi_tiles(W, meta.tiles, meta.order))
+
+
+def multi_lora_bucketed_splitk(x, W: PagedWeights, token_ranks, plan: "BucketPlan", *, out=None, add=False,
+                               concurrent=True):
+    """RF2-MA, per-width group launches (rf2_bucketed_tuned's strategy) on the shared kernels (MULTI).
+
+    One splitk_pass per rank bucket R present, at exactly R rank rows (no runtime branch), over that
+    bucket's tiles (tokens grouped by adapter inside the bucket), the buckets' pairs on concurrent
+    streams (fork/join, capturable). Each bucket's launch settings are _config at its own width,
+    with the plan's token block (BucketPlan.bm) and rf2_bucketed_tuned's tiled-expand BN; one split
+    count for all buckets (they share the workspace), as rf2_bucketed does."""
+    _check(x, W, token_ranks)
+    out = output_buffer(x, W, out, add)
+    T, h_in = x.shape
+    if T == 0:
+        return out
+    if plan.zero_idx.numel() and not add:
+        out.index_fill_(0, plan.zero_idx, 0)
+    if not plan.buckets:
+        return out
+    dev = x.device.index or 0
+    num_sms = rf._num_sms(dev)
+    S, elem = W.n_slices, x.element_size()
+    groups = []
+    for b in plan.buckets:  # heaviest first
+        cfg = rf._config(b["R"], T, dev, bm=b["bm"], bn=256 if b["bm"] <= 64 else 128)
+        bh, stages = rf._splitk_shrink_tiles(b["bm"], b["R"], elem, dev, cfg["bh"], cfg["stages"])
+        groups.append((b, cfg, bh, stages))
+    grid_tiles = sum(b["cap"] for b in plan.buckets)
+    bh_min = min(g[2] for g in groups)
+    tiled = any(g[1]["tiled"] for g in groups)
+    split_k = multi_split_k(h_in, T, tiled, grid_tiles * S, num_sms)
+    split_k, k_per = rf._split_count(h_in, tiled, grid_tiles, S, num_sms, bh_min, split_k)  # k_per: a multiple of bh_min
+    ws = torch.empty((S, split_k, T, plan.r_pad), dtype=torch.float32, device=x.device)
+
+    def launch(b, cfg, bh, stages):
+        # tile positions are global (one order for every bucket), so every bucket uses ws_row0 = 0
+        rf.splitk_pass(x, W.A_pool, W.B_pool, token_ranks, out, add, W.slice_sizes, W.scale_table, ws, plan.r_pad,
+                       plan.r_pad, split_k, k_per, b["bm"], bh if k_per % bh == 0 else bh_min, stages, grid_tiles=grid_tiles,
+                       rank=b["R"], block_n=cfg["bn"], shrink_warps=cfg["shrink_warps"], expand_warps=cfg["expand_warps"],
+                       tiled=cfg["tiled"], multi=multi_tiles(W, b["tiles"], plan.order))
+
+    if concurrent and len(groups) > 1:
+        main = torch.cuda.current_stream()
+        streams = []
+        for g in groups:
+            st = _stream(x.device, g[0]["R"])
+            st.wait_stream(main)
+            with torch.cuda.stream(st):
+                launch(*g)
+            streams.append(st)
+        for st in streams:
+            main.wait_stream(st)
+    else:
+        for g in groups:
+            launch(*g)
+    return out
+
+
+# ------------------------------------------------------------------------------------------------
 # rf2_ma_bucketed: a per-step CPU plan, one kernel pair per rank bucket
 # ------------------------------------------------------------------------------------------------
 
@@ -526,10 +646,43 @@ def _meta_impl(mode: str, doc: str):
     return fn, prepare
 
 
+@register_multi("rf1_ma", prepare=_meta_prepare("group"))
+def rf1_ma(x, W, token_adapter, token_ranks, meta: MultiMeta | None = None, out=None, add=False):
+    """RF1-MA on the shared split-K kernels (rankfuse_fused.splitk_pass, MULTI): tiles inside adapter
+    groups, every tile at its group's rank limit (masked loads), launch settings from _config."""
+    if meta is None:  # one host round trip; a serving engine builds meta once per step
+        meta = _meta_prepare("group")(x, W, token_adapter, token_ranks)["meta"]
+    return multi_lora_splitk(x, W, token_ranks, meta, out=out, add=add)
+
+
+def _skip_impl(mode: str, full_width: bool, doc: str):
+    prepare = _meta_prepare(mode)
+
+    def fn(x, W, token_adapter, token_ranks, meta: MultiMeta | None = None, out=None, add=False):
+        if meta is None:
+            meta = prepare(x, W, token_adapter, token_ranks)["meta"]
+        return multi_lora_splitk(x, W, token_ranks, meta, out=out, add=add, rank_skip=True, full_width=full_width)
+
+    fn.__doc__ = doc
+    return fn, prepare
+
+
+# RF2-MA strategy (i): RANK_SKIP inside multi-adapter tiles, on the shared kernels.
+for _name, _mode, _fw, _doc in (
+    ("rf2_ma_splitk", "rank_sorted", False, "RF2-MA: sort by (adapter, rank); each tile at its own width bucket (RANK_SKIP)."),
+    ("rf2_ma_splitk_fw", "rank_sorted", True, "rf2_ma_splitk's binary with every tile at the batch width (control)."),
+    ("rf2_ma_widths", "adapter_bucket", False,
+     "RF2-MA: groups of (adapter, width bucket), so no tile spans two widths; each tile at its own bucket."),
+    ("rf2_ma_segment", "segment", False, "RF2-MA segment: batch order, tiles = runs of one adapter, RANK_SKIP."),
+):
+    _fn, _prep = _skip_impl(_mode, _fw, _doc)
+    register_multi(_name, prepare=_prep)(_fn)
+
+
 for _name, _mode, _doc in (
-    ("rf1_ma", "group", "RF1-MA: tiles inside adapter groups, every tile at its group's rank limit (masked loads)."),
-    ("rf2_ma_splitk", "rank_sorted", "RF2 sorted split-K: sort by (adapter, rank), per-tile rank buckets."),
-    ("rf2_ma_segment", "segment", "RF2 segment: batch order, tiles = runs of one adapter, per-tile rank buckets."),
+    ("rf1_ma_legacy", "group", "RF1-MA on the Stage 2 kernels (_ma_*), kept for comparison with rf1_ma."),
+    ("rf2_ma_splitk_legacy", "rank_sorted", "rf2_ma_splitk on the Stage 2 kernels (_ma_*, BUCKETED)."),
+    ("rf2_ma_segment_legacy", "segment", "rf2_ma_segment on the Stage 2 kernels (_ma_*, BUCKETED)."),
 ):
     _fn, _prep = _meta_impl(_mode, _doc)
     register_multi(_name, prepare=_prep)(_fn)
@@ -542,7 +695,25 @@ def _bucketed_prepare(x, W, token_adapter, token_ranks) -> dict:
 @register_multi("rf2_ma_bucketed", prepare=_bucketed_prepare)
 def rf2_ma_bucketed(x, W, token_adapter, token_ranks, plan: BucketPlan | None = None, out=None, add=False,
                     concurrent=True):
-    """RF2 bucketed: one kernel pair per rank bucket (tiles grouped by adapter), concurrent streams."""
+    """RF2-MA strategy (ii): one shared-kernel launch per rank width (tiles grouped by adapter inside
+    each width), the widths on concurrent streams, each at its own _config settings."""
+    if plan is None:
+        plan = _bucketed_prepare(x, W, token_adapter, token_ranks)["plan"]
+    return multi_lora_bucketed_splitk(x, W, token_ranks, plan, out=out, add=add, concurrent=concurrent)
+
+
+@register_multi("rf2_ma_bucketed_seq", prepare=_bucketed_prepare)
+def rf2_ma_bucketed_seq(x, W, token_adapter, token_ranks, plan: BucketPlan | None = None, out=None, add=False):
+    """rf2_ma_bucketed with the widths launched one after another on one stream."""
+    if plan is None:
+        plan = _bucketed_prepare(x, W, token_adapter, token_ranks)["plan"]
+    return multi_lora_bucketed_splitk(x, W, token_ranks, plan, out=out, add=add, concurrent=False)
+
+
+@register_multi("rf2_ma_bucketed_legacy", prepare=_bucketed_prepare)
+def rf2_ma_bucketed_legacy(x, W, token_adapter, token_ranks, plan: BucketPlan | None = None, out=None, add=False,
+                           concurrent=True):
+    """rf2_ma_bucketed on the Stage 2 kernels (_ma_*), kept for comparison."""
     if plan is None:
         plan = _bucketed_prepare(x, W, token_adapter, token_ranks)["plan"]
     return multi_lora_bucketed(x, W, token_ranks, plan, out=out, add=add, concurrent=concurrent)
@@ -575,10 +746,11 @@ def _auto_prepare(x, W, token_adapter, token_ranks) -> dict:
 @register_multi("rf_ma_auto", prepare=_auto_prepare)
 def rf_ma_auto(x, W, token_adapter, token_ranks, meta: MultiMeta | None = None, plan: BucketPlan | None = None,
                out=None, add=False):
-    """rf1_ma or rf2_ma_bucketed, chosen per step by use_bucketed (from the prepared metadata)."""
+    """rf1_ma or rf2_ma_bucketed, chosen per step by use_bucketed (from the prepared metadata).
+    The selector was fitted with the legacy rf1_ma (H200, results/h200_2026-11-03_multi)."""
     if meta is None and plan is None:
         prepared = _auto_prepare(x, W, token_adapter, token_ranks)
         meta, plan = prepared.get("meta"), prepared.get("plan")
     if plan is not None:
-        return multi_lora_bucketed(x, W, token_ranks, plan, out=out, add=add)
-    return multi_lora(x, W, token_ranks, meta, out=out, add=add)
+        return multi_lora_bucketed_splitk(x, W, token_ranks, plan, out=out, add=add)
+    return multi_lora_splitk(x, W, token_ranks, meta, out=out, add=add)

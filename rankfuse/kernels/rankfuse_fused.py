@@ -231,10 +231,35 @@ from the graph's memory pool). At T = 32 with S = 16 it is 128 KiB and stays in 
 rows need no special case: their v is masked to zero. The shrink's pipeline depth, then BH,
 shrink when one stage of x and A_t tiles would not fit in shared memory (fp32 inputs,
 r_max 128-256, GPUs with less shared memory).
+
+=====================================================================================
+9. Multi-adapter mode (MULTI)
+=====================================================================================
+
+With MULTI=True the same two kernels serve many adapters (rankfuse/multi.py, RF1-MA and RF2-MA in
+rankfuse/kernels/rankfuse_multi.py). splitk_pass(..., multi=MultiTiles) launches them:
+
+    grid axis 0  one program row per entry of a per-step tile table (adapter, first position,
+                 length, group rank limit, first token), sized to its fixed capacity so one
+                 captured CUDA graph serves every step (MultiMeta.load_); empty entries exit
+    tokens       position p of a tile is token order[p] (index_ptr), or first + p when the tile's
+                 tokens are consecutive in the batch; partials go to ws row p as before, outputs to
+                 each token's own row
+    weights      A_t and B are page pools: rank row k of adapter a, slice s is at
+                 frame(a, k // 16) * FRAME + off[s] + (k % 16) * LD (int32 arithmetic unless OFF64),
+                 with per-slice offsets from a [S, 5] table, so merged q/k/v keep a separate A each
+    ranks        rows >= the tile's group limit are masked (r_limit is unused); RANK_SKIP branches on
+                 max(limit, force_rank) to the 16/32/64/128/256-wide part
+    scale        scale_table is [adapters, SCALE_LD] (scale of adapter a at rank r)
+
+The MULTI=False path is Tony's code unchanged: the two kernels call _splitk_shrink_single /
+_splitk_expand_single (his kernel bodies, inlined by Triton), and the multi-only parameters default
+to None / False, so the single-adapter specializations compile to the same code as before.
 """
 
 import functools
 import os
+from typing import NamedTuple
 
 import torch
 import triton
@@ -502,6 +527,195 @@ def _splitk_shrink_part(x_ptr, a_s, ws_k, tok, pos, row_ok, H_IN, r_limit, h_lo,
     tl.store(ws_k + pos[:, None] * R_PAD + k[None, :], v, mask=row_ok[:, None])
 
 
+# ---- Multi-adapter mode (MULTI=True; see section 9) -------------------------------------------------
+# Tokens come from a per-step tile table and weights from a page pool. Every helper below is used only
+# under MULTI, so the single-adapter specializations (MULTI=False) compile exactly as before.
+
+
+@triton.jit
+def _frame_rows(pt_ptr, adapter, PT_LD, k, k_ok, FRAME, off, LD, ALIGNED: tl.constexpr, OFF64: tl.constexpr):
+    # Element offset of rank row k of this adapter's matrix: frame(k // 16) * FRAME + off + (k % 16) * LD.
+    frame = tl.load(pt_ptr + adapter * PT_LD + k // 16, mask=k_ok, other=0)
+    if OFF64:
+        rows = frame.to(tl.int64) * FRAME + off + (k % 16) * LD
+    else:  # every offset fits in int32 (pools below 2**31 elements): cheaper address arithmetic
+        rows = frame * FRAME + off.to(tl.int32) + (k % 16) * LD.to(tl.int32)
+    if ALIGNED:
+        # FRAME, off and LD are multiples of 16 (checked on the host): lets a row's loads be vectorized.
+        rows = tl.multiple_of(rows, 16)
+    return rows
+
+
+@triton.jit
+def _tile_tokens(tiles_ptr, tile, order_ptr, pos, row_ok, BM: tl.constexpr):
+    # Token indices of a tile. A tile whose tokens are consecutive in the batch carries its first
+    # token (column 4) and skips the dependent load of `order`.
+    first = tl.load(tiles_ptr + tile * 5 + 4)
+    if first >= 0:
+        tok = first + tl.arange(0, BM)
+    else:
+        tok = tl.load(order_ptr + pos, mask=row_ok, other=0)
+    return tok
+
+
+@triton.jit
+def _splitk_shrink_part_multi(x_ptr, a_pool, pt_ptr, adapter, PT_LD, FRAME, a_off, ws_k, tok, pos, row_ok, H_IN, limit,
+                              h_lo, K_PER, BM: tl.constexpr, BH: tl.constexpr, R: tl.constexpr, R_PAD: tl.constexpr,
+                              ALIGNED: tl.constexpr, OFF64: tl.constexpr):
+    # _splitk_shrink_part over this tile's adapter rows (through the page table), up to its group limit.
+    k = tl.arange(0, R)
+    k_ok = k < limit
+    a_rows = _frame_rows(pt_ptr, adapter, PT_LD, k, k_ok, FRAME, a_off, H_IN, ALIGNED, OFF64)
+    v = tl.zeros((BM, R), dtype=tl.float32)
+    for h_start in range(0, K_PER, BH):
+        h = h_lo + h_start + tl.arange(0, BH)
+        h_ok = h < H_IN
+        x = tl.load(x_ptr + tok[:, None] * H_IN + h[None, :], mask=row_ok[:, None] & h_ok[None, :], other=0.0)
+        a = tl.load(a_pool + a_rows[:, None] + h[None, :], mask=k_ok[:, None] & h_ok[None, :], other=0.0)
+        v += tl.dot(x, tl.trans(a), input_precision="ieee")
+    tl.store(ws_k + pos[:, None] * R_PAD + k[None, :], v, mask=row_ok[:, None])
+
+
+@triton.jit
+def _splitk_store_tile_multi(v_in, b_pool, b_rows, k_ok, out_ptr, tok, row_ok, col_start, n_cols, out_col0, OUT_STRIDE,
+                             BN: tl.constexpr, ADD_OUT: tl.constexpr):
+    cols = col_start + tl.arange(0, BN)
+    col_ok = cols < n_cols
+    b = tl.load(b_pool + b_rows[:, None] + cols[None, :], mask=k_ok[:, None] & col_ok[None, :], other=0.0)
+    acc = tl.dot(v_in, b, input_precision="ieee")
+    ptrs = out_ptr + tok[:, None] * OUT_STRIDE + out_col0 + cols[None, :]
+    mask = row_ok[:, None] & col_ok[None, :]
+    if ADD_OUT:
+        acc += tl.load(ptrs, mask=mask, other=0.0).to(tl.float32)
+    tl.store(ptrs, acc, mask=mask)
+
+
+@triton.jit
+def _splitk_expand_part_multi(ws_s, scale_ptr, b_pool, pt_ptr, adapter, PT_LD, FRAME, b_off, b_ld, SCALE_LD, out_ptr, tok,
+                              pos, row_ok, ranks, limit, T, OUT_STRIDE, SPLIT_K, out_col0, n_cols, col_base, cols_per_prog,
+                              BM: tl.constexpr, BN: tl.constexpr, R: tl.constexpr, R_PAD: tl.constexpr,
+                              HAS_SCALE: tl.constexpr, ADD_OUT: tl.constexpr, LOOP: tl.constexpr, ALIGNED: tl.constexpr,
+                              OFF64: tl.constexpr):
+    # _splitk_expand_part with the tile's group limit, a per-adapter scale table and paged B rows.
+    k = tl.arange(0, R)
+    k_ok = k < limit
+    v = tl.zeros((BM, R), dtype=tl.float32)
+    for split in range(0, SPLIT_K):
+        v += tl.load(ws_s + split * T * R_PAD + pos[:, None] * R_PAD + k[None, :], mask=row_ok[:, None], other=0.0)
+    v = tl.where(k[None, :] < ranks[:, None], v, 0.0)
+    if HAS_SCALE:
+        v = v * tl.load(scale_ptr + adapter * SCALE_LD + ranks, mask=row_ok, other=0.0)[:, None]
+    v_in = v.to(out_ptr.dtype.element_ty)
+    b_rows = _frame_rows(pt_ptr, adapter, PT_LD, k, k_ok, FRAME, b_off, b_ld, ALIGNED, OFF64)
+    if LOOP:
+        for col_start in range(0, cols_per_prog, BN):
+            _splitk_store_tile_multi(v_in, b_pool, b_rows, k_ok, out_ptr, tok, row_ok, col_base + col_start, n_cols,
+                                     out_col0, OUT_STRIDE, BN=BN, ADD_OUT=ADD_OUT)
+    else:
+        _splitk_store_tile_multi(v_in, b_pool, b_rows, k_ok, out_ptr, tok, row_ok, col_base, n_cols, out_col0,
+                                 OUT_STRIDE, BN=BN, ADD_OUT=ADD_OUT)
+
+
+@triton.jit
+def _splitk_shrink_multi(x_ptr, a_ptr, order_ptr, ws_ptr, ws_row0, T, H_IN, force_rank, K_PER, WS_SLICE, tiles_ptr, pt_ptr,
+                         mslice_ptr, PT_LD, FRAME, BM: tl.constexpr, BH: tl.constexpr, R: tl.constexpr,
+                         R_PAD: tl.constexpr, RANK_SKIP: tl.constexpr, ALIGNED: tl.constexpr, OFF64: tl.constexpr):
+    # Program (tile, k, s): tile = (adapter, first position, length, group limit, first token).
+    tile = tl.program_id(0)
+    pid_k = tl.program_id(1)
+    pid_s = tl.program_id(2)
+    limit = tl.load(tiles_ptr + tile * 5 + 3)
+    if limit > 0:  # empty tiles and the no-LoRA group have limit 0
+        adapter = tl.load(tiles_ptr + tile * 5)
+        start = tl.load(tiles_ptr + tile * 5 + 1)
+        length = tl.load(tiles_ptr + tile * 5 + 2)
+        pos = start + tl.arange(0, BM)
+        row_ok = tl.arange(0, BM) < length
+        tok = _tile_tokens(tiles_ptr, tile, order_ptr, pos, row_ok, BM=BM)
+        a_off = tl.load(mslice_ptr + pid_s * 5 + 2)
+        h_lo = pid_k * K_PER
+        ws_k = ws_ptr + pid_s * WS_SLICE + (pid_k * T + ws_row0) * R_PAD
+        if RANK_SKIP:
+            tile_rank = tl.maximum(limit, force_rank)
+            if tile_rank <= 16:
+                _splitk_shrink_part_multi(x_ptr, a_ptr, pt_ptr, adapter, PT_LD, FRAME, a_off, ws_k, tok, pos, row_ok, H_IN, limit, h_lo, K_PER, BM=BM, BH=BH, R=16, R_PAD=R_PAD, ALIGNED=ALIGNED, OFF64=OFF64)
+            elif tile_rank <= 32:
+                if R_PAD >= 32:
+                    _splitk_shrink_part_multi(x_ptr, a_ptr, pt_ptr, adapter, PT_LD, FRAME, a_off, ws_k, tok, pos, row_ok, H_IN, limit, h_lo, K_PER, BM=BM, BH=BH, R=32, R_PAD=R_PAD, ALIGNED=ALIGNED, OFF64=OFF64)
+            elif tile_rank <= 64:
+                if R_PAD >= 64:
+                    _splitk_shrink_part_multi(x_ptr, a_ptr, pt_ptr, adapter, PT_LD, FRAME, a_off, ws_k, tok, pos, row_ok, H_IN, limit, h_lo, K_PER, BM=BM, BH=BH, R=64, R_PAD=R_PAD, ALIGNED=ALIGNED, OFF64=OFF64)
+            elif tile_rank <= 128:
+                if R_PAD >= 128:
+                    _splitk_shrink_part_multi(x_ptr, a_ptr, pt_ptr, adapter, PT_LD, FRAME, a_off, ws_k, tok, pos, row_ok, H_IN, limit, h_lo, K_PER, BM=BM, BH=BH, R=128, R_PAD=R_PAD, ALIGNED=ALIGNED, OFF64=OFF64)
+            else:
+                if R_PAD >= 256:
+                    _splitk_shrink_part_multi(x_ptr, a_ptr, pt_ptr, adapter, PT_LD, FRAME, a_off, ws_k, tok, pos, row_ok, H_IN, limit, h_lo, K_PER, BM=BM, BH=BH, R=256, R_PAD=R_PAD, ALIGNED=ALIGNED, OFF64=OFF64)
+        else:
+            _splitk_shrink_part_multi(x_ptr, a_ptr, pt_ptr, adapter, PT_LD, FRAME, a_off, ws_k, tok, pos, row_ok, H_IN, limit, h_lo, K_PER, BM=BM, BH=BH, R=R, R_PAD=R_PAD, ALIGNED=ALIGNED, OFF64=OFF64)
+
+
+@triton.jit
+def _splitk_expand_multi(ws_ptr, ranks_ptr, order_ptr, scale_ptr, b_ptr, out_ptr, slice_off_ptr, slice_size_ptr, ws_row0, T,
+                         OUT_STRIDE, force_rank, cols_per_prog, SPLIT_K, WS_SLICE, tiles_ptr, pt_ptr, mslice_ptr, PT_LD,
+                         FRAME, SCALE_LD, BM: tl.constexpr, BN: tl.constexpr, R: tl.constexpr, R_PAD: tl.constexpr,
+                         HAS_SCALE: tl.constexpr, ADD_OUT: tl.constexpr, ALIGNED: tl.constexpr, LOOP: tl.constexpr,
+                         RANK_SKIP: tl.constexpr, OFF64: tl.constexpr):
+    tile = tl.program_id(0)
+    pid_s = tl.program_id(2)
+    out_col0 = tl.load(slice_off_ptr + pid_s)
+    n_cols = tl.load(slice_size_ptr + pid_s)
+    if ALIGNED:
+        out_col0 = tl.multiple_of(out_col0, 16)
+        n_cols = tl.multiple_of(n_cols, 16)
+    if LOOP:
+        col_base = tl.program_id(1) * cols_per_prog
+    else:
+        col_base = tl.program_id(1) * BN
+    length = tl.load(tiles_ptr + tile * 5 + 2)
+    if length > 0:  # rows past the step's tile count are empty
+        if col_base < n_cols:
+            adapter = tl.load(tiles_ptr + tile * 5)
+            start = tl.load(tiles_ptr + tile * 5 + 1)
+            limit = tl.load(tiles_ptr + tile * 5 + 3)
+            pos = start + tl.arange(0, BM)
+            row_ok = tl.arange(0, BM) < length
+            tok = _tile_tokens(tiles_ptr, tile, order_ptr, pos, row_ok, BM=BM)
+            if limit == 0:
+                if not ADD_OUT:
+                    _splitk_zero_part(out_ptr, tok, row_ok, n_cols, out_col0, OUT_STRIDE, col_base, cols_per_prog, BM=BM, BN=BN, LOOP=LOOP)
+            else:
+                ranks = tl.load(ranks_ptr + tok, mask=row_ok, other=0)
+                b_off = tl.load(mslice_ptr + pid_s * 5 + 3)
+                b_ld = tl.load(mslice_ptr + pid_s * 5 + 4)
+                ws_s = ws_ptr + pid_s * WS_SLICE + ws_row0 * R_PAD
+                if RANK_SKIP:
+                    tile_rank = tl.maximum(limit, force_rank)
+                    if tile_rank <= 16:
+                        _splitk_expand_part_multi(ws_s, scale_ptr, b_ptr, pt_ptr, adapter, PT_LD, FRAME, b_off, b_ld, SCALE_LD, out_ptr, tok, pos, row_ok, ranks, limit, T, OUT_STRIDE, SPLIT_K, out_col0, n_cols, col_base, cols_per_prog,
+                                                  BM=BM, BN=BN, R=16, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, LOOP=LOOP, ALIGNED=ALIGNED, OFF64=OFF64)
+                    elif tile_rank <= 32:
+                        if R_PAD >= 32:
+                            _splitk_expand_part_multi(ws_s, scale_ptr, b_ptr, pt_ptr, adapter, PT_LD, FRAME, b_off, b_ld, SCALE_LD, out_ptr, tok, pos, row_ok, ranks, limit, T, OUT_STRIDE, SPLIT_K, out_col0, n_cols, col_base, cols_per_prog,
+                                                      BM=BM, BN=BN, R=32, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, LOOP=LOOP, ALIGNED=ALIGNED, OFF64=OFF64)
+                    elif tile_rank <= 64:
+                        if R_PAD >= 64:
+                            _splitk_expand_part_multi(ws_s, scale_ptr, b_ptr, pt_ptr, adapter, PT_LD, FRAME, b_off, b_ld, SCALE_LD, out_ptr, tok, pos, row_ok, ranks, limit, T, OUT_STRIDE, SPLIT_K, out_col0, n_cols, col_base, cols_per_prog,
+                                                      BM=BM, BN=BN, R=64, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, LOOP=LOOP, ALIGNED=ALIGNED, OFF64=OFF64)
+                    elif tile_rank <= 128:
+                        if R_PAD >= 128:
+                            _splitk_expand_part_multi(ws_s, scale_ptr, b_ptr, pt_ptr, adapter, PT_LD, FRAME, b_off, b_ld, SCALE_LD, out_ptr, tok, pos, row_ok, ranks, limit, T, OUT_STRIDE, SPLIT_K, out_col0, n_cols, col_base, cols_per_prog,
+                                                      BM=BM, BN=BN, R=128, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, LOOP=LOOP, ALIGNED=ALIGNED, OFF64=OFF64)
+                    else:
+                        if R_PAD >= 256:
+                            _splitk_expand_part_multi(ws_s, scale_ptr, b_ptr, pt_ptr, adapter, PT_LD, FRAME, b_off, b_ld, SCALE_LD, out_ptr, tok, pos, row_ok, ranks, limit, T, OUT_STRIDE, SPLIT_K, out_col0, n_cols, col_base, cols_per_prog,
+                                                      BM=BM, BN=BN, R=256, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, LOOP=LOOP, ALIGNED=ALIGNED, OFF64=OFF64)
+                else:
+                    _splitk_expand_part_multi(ws_s, scale_ptr, b_ptr, pt_ptr, adapter, PT_LD, FRAME, b_off, b_ld, SCALE_LD, out_ptr, tok, pos, row_ok, ranks, limit, T, OUT_STRIDE, SPLIT_K, out_col0, n_cols, col_base, cols_per_prog,
+                                              BM=BM, BN=BN, R=R, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, LOOP=LOOP, ALIGNED=ALIGNED, OFF64=OFF64)
+
+
+
 # force_rank is left out of specialization: rank skipping and its full-width control run the
 # same compiled binary, so the rank width taken at run time is their only difference.
 @triton.jit(do_not_specialize=["force_rank"])
@@ -527,7 +741,30 @@ def _splitk_shrink_kernel(
     INDEXED: tl.constexpr,
     RANK_SKIP: tl.constexpr,
     RANK_PROBE: tl.constexpr,
+    tiles_ptr=None,
+    pt_ptr=None,
+    mslice_ptr=None,
+    PT_LD=None,
+    FRAME=None,
+    MULTI: tl.constexpr = False,
+    ALIGNED: tl.constexpr = False,
+    OFF64: tl.constexpr = False,
 ):
+    if MULTI:
+        # Section 9: tiles from the tile table (index_ptr is the token order), paged A rows.
+        _splitk_shrink_multi(x_ptr, a_ptr, index_ptr, ws_ptr, ws_row0, T, H_IN, force_rank, K_PER, WS_SLICE, tiles_ptr, pt_ptr,
+                             mslice_ptr, PT_LD, FRAME, BM=BM, BH=BH, R=R, R_PAD=R_PAD, RANK_SKIP=RANK_SKIP,
+                             ALIGNED=ALIGNED, OFF64=OFF64)
+    else:
+        _splitk_shrink_single(x_ptr, a_ptr, ranks_ptr, index_ptr, ws_ptr, count, ws_row0, T, H_IN, r_limit, force_rank, K_PER,
+                              A_SLICE, WS_SLICE, BM=BM, BH=BH, R=R, R_PAD=R_PAD, INDEXED=INDEXED, RANK_SKIP=RANK_SKIP,
+                              RANK_PROBE=RANK_PROBE)
+
+
+@triton.jit
+def _splitk_shrink_single(x_ptr, a_ptr, ranks_ptr, index_ptr, ws_ptr, count, ws_row0, T, H_IN, r_limit, force_rank, K_PER,
+                          A_SLICE, WS_SLICE, BM: tl.constexpr, BH: tl.constexpr, R: tl.constexpr, R_PAD: tl.constexpr,
+                          INDEXED: tl.constexpr, RANK_SKIP: tl.constexpr, RANK_PROBE: tl.constexpr):
     # Section 8, phase 1: token block m, h_in slice k, output slice s.
     pid_k = tl.program_id(1)
     pid_s = tl.program_id(2)
@@ -655,7 +892,35 @@ def _splitk_expand_kernel(
     INDEXED: tl.constexpr,
     RANK_SKIP: tl.constexpr,
     RANK_PROBE: tl.constexpr,
+    tiles_ptr=None,
+    pt_ptr=None,
+    mslice_ptr=None,
+    PT_LD=None,
+    FRAME=None,
+    SCALE_LD=None,
+    MULTI: tl.constexpr = False,
+    OFF64: tl.constexpr = False,
 ):
+    if MULTI:
+        # Section 9: tiles from the tile table (index_ptr is the token order), paged B rows,
+        # per-adapter scales (scale_tab_ptr is [adapters, SCALE_LD]).
+        _splitk_expand_multi(ws_ptr, ranks_ptr, index_ptr, scale_tab_ptr, b_ptr, out_ptr, slice_off_ptr, slice_size_ptr, ws_row0, T,
+                             OUT_STRIDE, force_rank, cols_per_prog, SPLIT_K, WS_SLICE, tiles_ptr, pt_ptr, mslice_ptr, PT_LD,
+                             FRAME, SCALE_LD, BM=BM, BN=BN, R=R, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT,
+                             ALIGNED=ALIGNED, LOOP=LOOP, RANK_SKIP=RANK_SKIP, OFF64=OFF64)
+    else:
+        _splitk_expand_single(ws_ptr, ranks_ptr, index_ptr, scale_tab_ptr, b_ptr, out_ptr, slice_off_ptr, slice_size_ptr, count,
+                              ws_row0, T, N_MAX, OUT_STRIDE, r_limit, force_rank, cols_per_prog, SPLIT_K, B_SLICE, WS_SLICE,
+                              BM=BM, BN=BN, R=R, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT, ALIGNED=ALIGNED,
+                              LOOP=LOOP, INDEXED=INDEXED, RANK_SKIP=RANK_SKIP, RANK_PROBE=RANK_PROBE)
+
+
+@triton.jit
+def _splitk_expand_single(ws_ptr, ranks_ptr, index_ptr, scale_tab_ptr, b_ptr, out_ptr, slice_off_ptr, slice_size_ptr, count,
+                          ws_row0, T, N_MAX, OUT_STRIDE, r_limit, force_rank, cols_per_prog, SPLIT_K, B_SLICE, WS_SLICE,
+                          BM: tl.constexpr, BN: tl.constexpr, R: tl.constexpr, R_PAD: tl.constexpr, HAS_SCALE: tl.constexpr,
+                          ADD_OUT: tl.constexpr, ALIGNED: tl.constexpr, LOOP: tl.constexpr, INDEXED: tl.constexpr,
+                          RANK_SKIP: tl.constexpr, RANK_PROBE: tl.constexpr):
     # Section 8, phase 2. With LOOP each program walks a column strip; without it (above
     # EXPAND_TILED_MIN_TOKENS) each program owns one BM x BN output tile.
     pid_s = tl.program_id(2)
@@ -848,8 +1113,10 @@ def _split_count(h_in: int, tiled: bool, grid_tiles: int, n_slices: int, num_sms
 
 def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, block_m, bh, stages,
                 *, index=None, count=None, ws_row0=0, grid_tiles=None, rank=None, rank_skip=False, rank_probe=0, force_rank=0, block_n=None,
-                shrink_warps=4, expand_warps=None, tiled=None):
+                shrink_warps=4, expand_warps=None, tiled=None, multi=None):
     """Launch the two split-K kernels for one group of tokens; every RF1 and RF2 variant comes here.
+
+    multi: a MultiTiles (section 9) for the multi-adapter mode; A_t and B are then the weight pools.
 
     Tokens: the batch in order (index None), or index[:count] through a lookup, with partials in
     workspace rows ws_row0 + position. Rank width: R_PAD; or `rank` rows for this group; or, with
@@ -860,6 +1127,11 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
     expand's tile and warps, shrink_warps the shrink's warps, tiled the expand mode (None: tiled
     above EXPAND_TILED_MIN_TOKENS; all from _config).
     """
+    if multi is not None:
+        return _splitk_pass_multi(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per,
+                                  block_m, bh, stages, multi, ws_row0=ws_row0, grid_tiles=grid_tiles, rank=rank,
+                                  rank_skip=rank_skip, force_rank=force_rank, block_n=block_n, shrink_warps=shrink_warps,
+                                  expand_warps=expand_warps, tiled=tiled)
     num_tokens, h_in = x.shape
     n_slices, r_max, _ = A_t.shape
     n_max = B.shape[2]
@@ -905,6 +1177,83 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
     return out
 
 
+class MultiTiles(NamedTuple):
+    """What splitk_pass needs for the multi-adapter mode (section 9); rankfuse.kernels.rankfuse_multi
+    builds it from a MultiMeta and a PagedWeights.
+
+        tiles        [capacity, 5] int32: adapter, first position, length, group limit, first token
+        order        [T] int32: position -> token
+        page_table   [adapters, pt_ld] int32 frames
+        slice_table  [S, 5] int64: out_col0, n_cols, a_off, b_off, b_ld per output slice
+        frame_a/_b   elements between frames of the A / B pool
+        scale_ld     row length of the per-adapter scale table (r_max + 1)
+        aligned      every pool offset and slice width is a multiple of 16 (PagedWeights.aligned)
+        off64        64-bit offsets (a pool of 2**31 elements or more)
+    """
+
+    tiles: torch.Tensor
+    order: torch.Tensor
+    page_table: torch.Tensor
+    slice_table: torch.Tensor
+    pt_ld: int
+    frame_a: int
+    frame_b: int
+    scale_ld: int
+    n_slices: int
+    aligned: bool
+    off64: bool
+
+    @property
+    def capacity(self) -> int:
+        return self.tiles.shape[0]
+
+
+def _splitk_pass_multi(x, A_pool, B_pool, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per,
+                       block_m, bh, stages, multi: MultiTiles, *, ws_row0=0, grid_tiles=None, rank=None, rank_skip=False,
+                       force_rank=0, block_n=None, shrink_warps=4, expand_warps=None, tiled=None):
+    """splitk_pass's multi-adapter mode: one program row per tile-table entry (the table's capacity, so
+    the grid is the same every step) and the expand tile rules of splitk_pass, with the tile count as
+    the token-block count. ws is [n_slices, split_k, T, r_pad] fp32 as in the single-adapter mode."""
+    num_tokens, h_in = x.shape
+    n_slices = multi.n_slices
+    device_index = x.device.index or 0
+    cap = multi.capacity
+    ws_slice = split_k * num_tokens * r_pad
+    r = r_pad if rank is None else rank
+    aligned = USE_ALIGNED_HINT and multi.aligned
+    tables = dict(tiles_ptr=multi.tiles, pt_ptr=multi.page_table, mslice_ptr=multi.slice_table, PT_LD=multi.pt_ld)
+    _splitk_shrink_kernel[(cap, split_k, n_slices)](
+        x, A_pool, token_ranks, multi.order, ws, num_tokens, ws_row0, num_tokens, h_in, r_limit, force_rank, k_per, 0, ws_slice,
+        BM=block_m, BH=bh, R=r, R_PAD=r_pad, INDEXED=False, RANK_SKIP=rank_skip, RANK_PROBE=0, **tables,
+        FRAME=multi.frame_a, MULTI=True, ALIGNED=aligned, OFF64=multi.off64, num_warps=shrink_warps, num_stages=stages,
+    )
+    widest = max(sizes)
+    offsets, widths = _slice_tables(sizes, x.device)
+    scales = out if scale_table is None else scale_table
+    if tiled is None:
+        tiled = num_tokens > EXPAND_TILED_MIN_TOKENS
+    if tiled:
+        guard_r = r_pad if block_n is None else r
+        block_n = EXPAND_TILED_BLOCK_N if block_n is None else block_n
+        while block_n > 64 and guard_r * block_n * x.element_size() > 0.35 * _max_shared_mem(device_index):
+            block_n //= 2
+        cols_per_prog, warps = block_n, EXPAND_TILED_WARPS if expand_warps is None else expand_warps
+    else:
+        block_n, warps = EXPAND_BLOCK_N, EXPAND_WARPS
+        n_tiles = triton.cdiv(widest, block_n)
+        tiles = cap if grid_tiles is None else grid_tiles
+        n_split = min(n_tiles, max(1, EXPAND_WAVES * _num_sms(device_index) // (tiles * n_slices)))
+        cols_per_prog = triton.cdiv(n_tiles, n_split) * block_n
+    _splitk_expand_kernel[(cap, triton.cdiv(widest, cols_per_prog), n_slices)](
+        ws, token_ranks, multi.order, scales, B_pool, out, offsets, widths, num_tokens, ws_row0,
+        num_tokens, 0, out.stride(0), r_limit, force_rank, cols_per_prog, split_k, 0, ws_slice,
+        BM=block_m, BN=block_n, R=r, R_PAD=r_pad, HAS_SCALE=scale_table is not None, ADD_OUT=add,
+        ALIGNED=aligned, LOOP=not tiled, INDEXED=False, RANK_SKIP=rank_skip, RANK_PROBE=0, **tables,
+        FRAME=multi.frame_b, SCALE_LD=multi.scale_ld, MULTI=True, OFF64=multi.off64, num_warps=warps, num_stages=2,
+    )
+    return out
+
+
 def _settings_key() -> tuple:
     """The module settings a launch plan depends on. bench/rf1_ablation.py and bench/tune_blocks.py
     change them at run time and tests monkeypatch TUNED, so they are part of every plan key. TUNED
@@ -913,6 +1262,12 @@ def _settings_key() -> tuple:
     return (TUNED_GPU, id(TUNED), len(TUNED), id(_block_m), USE_ALIGNED_HINT, SPLITK_BLOCK_H, SPLITK_STAGES, SPLITK_WAVES,
             MAX_SPLIT_K, EXPAND_BLOCK_N, EXPAND_WAVES, EXPAND_WARPS, EXPAND_TILED_MIN_TOKENS, EXPAND_TILED_BLOCK_N,
             EXPAND_TILED_WARPS, MIN_SPLIT_K_TILED)
+
+
+# Values of the kernels' multi-adapter parameters when MULTI is off (their defaults). Triton's launcher
+# binds defaults as arguments, so a direct launch of a compiled kernel passes them as well.
+_SHRINK_SINGLE_DEFAULTS = (None, None, None, None, None, False, False, False)
+_EXPAND_SINGLE_DEFAULTS = (None, None, None, None, None, None, False, False)
 
 
 class _SplitKPlan:
@@ -943,7 +1298,8 @@ class _SplitKPlan:
         self.ws_numel = n_slices * ws_slice
         self.shrink_grid = (m_tiles, split_k, n_slices)
         self.shrink_mid = (num_tokens, 0, num_tokens, h_in)
-        self.shrink_tail = (k_per, r_max * h_in, ws_slice, block_m, bh, r_pad, r_pad, indexed, rank_skip, rank_probe)
+        self.shrink_tail = ((k_per, r_max * h_in, ws_slice, block_m, bh, r_pad, r_pad, indexed, rank_skip, rank_probe)
+                            + _SHRINK_SINGLE_DEFAULTS)
         self.shrink_opts = (cfg["shrink_warps"], stages)
         widest = max(sizes)
         aligned = USE_ALIGNED_HINT and all(s % 16 == 0 for s in sizes)
@@ -961,7 +1317,7 @@ class _SplitKPlan:
         self.expand_grid = (m_tiles, triton.cdiv(widest, cols_per_prog), n_slices)
         self.expand_mid = (num_tokens, 0, num_tokens, n_max, out_stride)
         self.expand_tail = (cols_per_prog, split_k, r_max * n_max, ws_slice, block_m, block_n, r_pad, r_pad, has_scale,
-                            add, aligned, not tiled, indexed, rank_skip, rank_probe)
+                            add, aligned, not tiled, indexed, rank_skip, rank_probe) + _EXPAND_SINGLE_DEFAULTS
         self.expand_opts = (warps, 2)
         self.kernels = {}
         self.refs = (TUNED, _block_m)

@@ -228,7 +228,8 @@ class PagedWeights:
 # Per-step metadata
 # ------------------------------------------------------------------------------------------------
 
-MODES = ("group", "rank_sorted", "segment")
+MODES = ("group", "rank_sorted", "segment", "adapter_bucket")
+WIDTH_BUCKETS = 5  # rank-width buckets 16 / 32 / 64 / 128 / 256
 
 
 @dataclass
@@ -322,6 +323,8 @@ def tile_capacity(T: int, bm: int, num_adapters: int, mode: str = "group") -> in
     "segment" mode a group is a run of one adapter, so there can be T of them)."""
     if mode == "segment":
         return T + 1
+    if mode == "adapter_bucket":  # a group per (adapter, width bucket)
+        return -(-T // bm) + min(num_adapters * WIDTH_BUCKETS, T) + 1
     return -(-T // bm) + min(num_adapters, T) + 1
 
 
@@ -342,6 +345,9 @@ def build_meta(
          "rank_sorted"  sort by (adapter, rank); every tile's limit is its own maximum rank (rf2_splitk)
          "segment"      keep the batch order; groups are runs of consecutive tokens on one adapter and
                         every tile's limit is its own maximum rank (rf2_segment)
+         "adapter_bucket"  sort by (adapter, width bucket 16/32/64/128/256, rank); groups are
+                        (adapter, bucket) pairs, so no tile spans two widths; every tile's limit is its
+                        own maximum rank (RF2-MA with RANK_SKIP per adapter-width group)
     bm, r_pad and capacity default to what this step needs; pass fixed values (e.g. r_pad from
     r_max and capacity from tile_capacity) to reuse one captured CUDA graph across steps.
     """
@@ -364,6 +370,15 @@ def build_meta(
         k_sorted = key_ad
         new_group = torch.ones(T, dtype=torch.bool)
         new_group[1:] = k_sorted[1:] != k_sorted[:-1]
+    elif mode == "adapter_bucket":
+        # width bucket index 1..5 (0 for rank 0): ceil(log2(max(r, 16) / 16)) + 1
+        bidx = torch.where(rk > 0, torch.ceil(torch.log2(rk.clamp(min=16).double() / 16)).long() + 1, 0)
+        gkey = key_ad * (WIDTH_BUCKETS + 1) + bidx
+        order = torch.argsort(gkey * 1024 + rk, stable=True)
+        k_sorted = key_ad[order]
+        g_sorted = gkey[order]
+        new_group = torch.ones(T, dtype=torch.bool)
+        new_group[1:] = g_sorted[1:] != g_sorted[:-1]
     else:
         key = key_ad * 1024 + rk if mode == "rank_sorted" else key_ad
         order = torch.argsort(key, stable=True)
@@ -412,7 +427,8 @@ def build_meta(
     dev = torch.device(device)
     i32 = lambda t: t.to(torch.int32).to(dev)  # noqa: E731
     # Groups are sized to the largest possible count for in-place reloads (load_).
-    g_cap = max(G, (T if mode == "segment" else min(num_adapters, T)) + 1) if capacity else max(G, 1)
+    most = T if mode == "segment" else min(num_adapters * WIDTH_BUCKETS, T) if mode == "adapter_bucket" else min(num_adapters, T)
+    g_cap = max(G, most + 1) if capacity else max(G, 1)
 
     def padded(t):
         out = torch.zeros(g_cap, dtype=torch.int64)
