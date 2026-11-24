@@ -623,12 +623,15 @@ def _splitk_expand_part_multi(ws_s, scale_ptr, b_pool, pt_ptr, adapter, PT_LD, F
 @triton.jit
 def _splitk_shrink_multi(x_ptr, a_ptr, ranks_ptr, order_ptr, ws_ptr, ws_row0, T, H_IN, force_rank, mask_floor, K_PER, WS_SLICE,
                          tiles_ptr, pt_ptr, mslice_ptr, PT_LD, FRAME, BM: tl.constexpr, BH: tl.constexpr, R: tl.constexpr,
-                         R_PAD: tl.constexpr, RANK_SKIP: tl.constexpr, ALIGNED: tl.constexpr, OFF64: tl.constexpr):
-    # Program (tile, k, s). The tile table gives (adapter, first position, length); the rank width comes
+                         R_PAD: tl.constexpr, RANK_SKIP: tl.constexpr, ALIGNED: tl.constexpr, OFF64: tl.constexpr,
+                         TOKEN_RANKS: tl.constexpr):
+    # Program (tile, k, s). The tile table gives (adapter, first position, length). With TOKEN_RANKS the rank width comes
     # from the tile's tokens' ranks, read from token_ranks at run time (CUDA-graph replay included), as in
     # Tony's RANK_SKIP: tile_rank = max rank of the tile. Rank rows k >= max(tile_rank, mask_floor) are not
     # loaded; with RANK_SKIP the tile runs at the bucket of max(tile_rank, force_rank). The tile table's
-    # limit column is not used. Empty tiles and the no-LoRA group (adapter -1) do nothing.
+    # limit column is not used. Without TOKEN_RANKS, tile_rank is the tile table's limit column instead (one dependent
+    # load fewer per program; follows rank changes only through MultiMeta.load_). Empty tiles and the no-LoRA group
+    # (adapter -1) do nothing.
     tile = tl.program_id(0)
     pid_k = tl.program_id(1)
     pid_s = tl.program_id(2)
@@ -640,8 +643,11 @@ def _splitk_shrink_multi(x_ptr, a_ptr, ranks_ptr, order_ptr, ws_ptr, ws_row0, T,
             pos = start + tl.arange(0, BM)
             row_ok = tl.arange(0, BM) < length
             tok = _tile_tokens(tiles_ptr, tile, order_ptr, pos, row_ok, BM=BM)
-            ranks = tl.load(ranks_ptr + tok, mask=row_ok, other=0)
-            tile_rank = tl.max(ranks, axis=0).to(tl.int32)
+            if TOKEN_RANKS:
+                ranks = tl.load(ranks_ptr + tok, mask=row_ok, other=0)
+                tile_rank = tl.max(ranks, axis=0).to(tl.int32)
+            else:
+                tile_rank = tl.load(tiles_ptr + tile * 5 + 3)
             if tile_rank > 0:
                 lim = tl.maximum(tile_rank, mask_floor)
                 a_off = tl.load(mslice_ptr + pid_s * 5 + 2)
@@ -681,7 +687,7 @@ def _splitk_expand_multi(ws_ptr, ranks_ptr, order_ptr, scale_ptr, b_ptr, out_ptr
                          OUT_STRIDE, force_rank, mask_floor, cols_per_prog, SPLIT_K, WS_SLICE, tiles_ptr, pt_ptr, mslice_ptr,
                          PT_LD, FRAME, SCALE_LD, BM: tl.constexpr, BN: tl.constexpr, R: tl.constexpr, R_PAD: tl.constexpr,
                          HAS_SCALE: tl.constexpr, ADD_OUT: tl.constexpr, ALIGNED: tl.constexpr, LOOP: tl.constexpr,
-                         RANK_SKIP: tl.constexpr, OFF64: tl.constexpr):
+                         RANK_SKIP: tl.constexpr, OFF64: tl.constexpr, TOKEN_RANKS: tl.constexpr):
     # The tile's rank width as in _splitk_shrink_multi (from its tokens' ranks at run time). A tile of the
     # no-LoRA group, or whose ranks are all 0, writes zeros (nothing with add=True).
     tile = tl.program_id(0)
@@ -704,7 +710,10 @@ def _splitk_expand_multi(ws_ptr, ranks_ptr, order_ptr, scale_ptr, b_ptr, out_ptr
             row_ok = tl.arange(0, BM) < length
             tok = _tile_tokens(tiles_ptr, tile, order_ptr, pos, row_ok, BM=BM)
             ranks = tl.load(ranks_ptr + tok, mask=row_ok, other=0)
-            tile_rank = tl.where(adapter >= 0, tl.max(ranks, axis=0).to(tl.int32), 0)
+            if TOKEN_RANKS:
+                tile_rank = tl.where(adapter >= 0, tl.max(ranks, axis=0).to(tl.int32), 0)
+            else:
+                tile_rank = tl.load(tiles_ptr + tile * 5 + 3)
             if tile_rank == 0:
                 if not ADD_OUT:
                     _splitk_zero_part(out_ptr, tok, row_ok, n_cols, out_col0, OUT_STRIDE, col_base, cols_per_prog, BM=BM, BN=BN, LOOP=LOOP)
@@ -785,12 +794,13 @@ def _splitk_shrink_kernel(
     MULTI: tl.constexpr = False,
     ALIGNED: tl.constexpr = False,
     OFF64: tl.constexpr = False,
+    TOKEN_RANKS: tl.constexpr = False,
 ):
     if MULTI:
         # Section 9: tiles from the tile table (index_ptr is the token order), paged A rows.
         _splitk_shrink_multi(x_ptr, a_ptr, ranks_ptr, index_ptr, ws_ptr, ws_row0, T, H_IN, force_rank, MASK_FLOOR, K_PER,
                              WS_SLICE, tiles_ptr, pt_ptr, mslice_ptr, PT_LD, FRAME, BM=BM, BH=BH, R=R, R_PAD=R_PAD, RANK_SKIP=RANK_SKIP,
-                             ALIGNED=ALIGNED, OFF64=OFF64)
+                             ALIGNED=ALIGNED, OFF64=OFF64, TOKEN_RANKS=TOKEN_RANKS)
     else:
         _splitk_shrink_single(x_ptr, a_ptr, ranks_ptr, index_ptr, ws_ptr, count, ws_row0, T, H_IN, r_limit, force_rank, K_PER,
                               A_SLICE, WS_SLICE, BM=BM, BH=BH, R=R, R_PAD=R_PAD, INDEXED=INDEXED, RANK_SKIP=RANK_SKIP,
@@ -937,6 +947,7 @@ def _splitk_expand_kernel(
     MASK_FLOOR=None,
     MULTI: tl.constexpr = False,
     OFF64: tl.constexpr = False,
+    TOKEN_RANKS: tl.constexpr = False,
 ):
     if MULTI:
         # Section 9: tiles from the tile table (index_ptr is the token order), paged B rows,
@@ -944,7 +955,7 @@ def _splitk_expand_kernel(
         _splitk_expand_multi(ws_ptr, ranks_ptr, index_ptr, scale_tab_ptr, b_ptr, out_ptr, slice_off_ptr, slice_size_ptr, ws_row0, T,
                              OUT_STRIDE, force_rank, MASK_FLOOR, cols_per_prog, SPLIT_K, WS_SLICE, tiles_ptr, pt_ptr,
                              mslice_ptr, PT_LD, FRAME, SCALE_LD, BM=BM, BN=BN, R=R, R_PAD=R_PAD, HAS_SCALE=HAS_SCALE, ADD_OUT=ADD_OUT,
-                             ALIGNED=ALIGNED, LOOP=LOOP, RANK_SKIP=RANK_SKIP, OFF64=OFF64)
+                             ALIGNED=ALIGNED, LOOP=LOOP, RANK_SKIP=RANK_SKIP, OFF64=OFF64, TOKEN_RANKS=TOKEN_RANKS)
     else:
         _splitk_expand_single(ws_ptr, ranks_ptr, index_ptr, scale_tab_ptr, b_ptr, out_ptr, slice_off_ptr, slice_size_ptr, count,
                               ws_row0, T, N_MAX, OUT_STRIDE, r_limit, force_rank, cols_per_prog, SPLIT_K, B_SLICE, WS_SLICE,
@@ -1150,12 +1161,14 @@ def _split_count(h_in: int, tiled: bool, grid_tiles: int, n_slices: int, num_sms
 
 def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per, block_m, bh, stages,
                 *, index=None, count=None, ws_row0=0, grid_tiles=None, rank=None, rank_skip=False, rank_probe=0, force_rank=0, block_n=None,
-                shrink_warps=4, expand_warps=None, tiled=None, multi=None, mask_floor=0):
+                shrink_warps=4, expand_warps=None, tiled=None, multi=None, mask_floor=0, token_ranks_width=True):
     """Launch the two split-K kernels for one group of tokens; every RF1 and RF2 variant comes here.
 
     multi: a MultiTiles (section 9) for the multi-adapter mode; A_t and B are then the weight pools.
     mask_floor (multi only): load at least this many rank rows per tile (a control: the bytes the
-    per-tile rank masking saves); 0 normally.
+    per-tile rank masking saves); 0 normally. token_ranks_width (multi only): each tile's width from its
+    tokens' ranks at run time (default), or False: from the tile table's limit column (cheaper; follows
+    rank changes only through MultiMeta.load_).
 
     Tokens: the batch in order (index None), or index[:count] through a lookup, with partials in
     workspace rows ws_row0 + position. Rank width: R_PAD; or `rank` rows for this group; or, with
@@ -1170,7 +1183,8 @@ def splitk_pass(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limi
         return _splitk_pass_multi(x, A_t, B, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per,
                                   block_m, bh, stages, multi, ws_row0=ws_row0, grid_tiles=grid_tiles, rank=rank,
                                   rank_skip=rank_skip, force_rank=force_rank, block_n=block_n, shrink_warps=shrink_warps,
-                                  expand_warps=expand_warps, tiled=tiled, mask_floor=mask_floor)
+                                  expand_warps=expand_warps, tiled=tiled, mask_floor=mask_floor,
+                                  token_ranks_width=token_ranks_width)
     num_tokens, h_in = x.shape
     n_slices, r_max, _ = A_t.shape
     n_max = B.shape[2]
@@ -1249,7 +1263,8 @@ class MultiTiles(NamedTuple):
 
 def _splitk_pass_multi(x, A_pool, B_pool, token_ranks, out, add, sizes, scale_table, ws, r_limit, r_pad, split_k, k_per,
                        block_m, bh, stages, multi: MultiTiles, *, ws_row0=0, grid_tiles=None, rank=None, rank_skip=False,
-                       force_rank=0, block_n=None, shrink_warps=4, expand_warps=None, tiled=None, mask_floor=0):
+                       force_rank=0, block_n=None, shrink_warps=4, expand_warps=None, tiled=None, mask_floor=0,
+                       token_ranks_width=True):
     """splitk_pass's multi-adapter mode: one program row per tile-table entry (the table's capacity, so
     the grid is the same every step) and the expand tile rules of splitk_pass, with the tile count as
     the token-block count. ws is [n_slices, split_k, T, r_pad] fp32 as in the single-adapter mode."""
@@ -1264,7 +1279,7 @@ def _splitk_pass_multi(x, A_pool, B_pool, token_ranks, out, add, sizes, scale_ta
     _splitk_shrink_kernel[(cap, split_k, n_slices)](
         x, A_pool, token_ranks, multi.order, ws, num_tokens, ws_row0, num_tokens, h_in, r_limit, force_rank, k_per, 0, ws_slice,
         BM=block_m, BH=bh, R=r, R_PAD=r_pad, INDEXED=False, RANK_SKIP=rank_skip, RANK_PROBE=0, **tables,
-        FRAME=multi.frame_a, MASK_FLOOR=mask_floor, MULTI=True, ALIGNED=aligned, OFF64=multi.off64, num_warps=shrink_warps, num_stages=stages,
+        FRAME=multi.frame_a, MASK_FLOOR=mask_floor, MULTI=True, ALIGNED=aligned, OFF64=multi.off64, TOKEN_RANKS=token_ranks_width, num_warps=shrink_warps, num_stages=stages,
     )
     widest = max(sizes)
     offsets, widths = _slice_tables(sizes, x.device)
@@ -1288,7 +1303,8 @@ def _splitk_pass_multi(x, A_pool, B_pool, token_ranks, out, add, sizes, scale_ta
         num_tokens, 0, out.stride(0), r_limit, force_rank, cols_per_prog, split_k, 0, ws_slice,
         BM=block_m, BN=block_n, R=r, R_PAD=r_pad, HAS_SCALE=scale_table is not None, ADD_OUT=add,
         ALIGNED=aligned, LOOP=not tiled, INDEXED=False, RANK_SKIP=rank_skip, RANK_PROBE=0, **tables,
-        FRAME=multi.frame_b, SCALE_LD=multi.scale_ld, MASK_FLOOR=mask_floor, MULTI=True, OFF64=multi.off64, num_warps=warps, num_stages=2,
+        FRAME=multi.frame_b, SCALE_LD=multi.scale_ld, MASK_FLOOR=mask_floor, MULTI=True, OFF64=multi.off64,
+        TOKEN_RANKS=token_ranks_width, num_warps=warps, num_stages=2,
     )
     return out
 
@@ -1305,8 +1321,8 @@ def _settings_key() -> tuple:
 
 # Values of the kernels' multi-adapter parameters when MULTI is off (their defaults). Triton's launcher
 # binds defaults as arguments, so a direct launch of a compiled kernel passes them as well.
-_SHRINK_SINGLE_DEFAULTS = (None, None, None, None, None, None, False, False, False)
-_EXPAND_SINGLE_DEFAULTS = (None, None, None, None, None, None, None, False, False)
+_SHRINK_SINGLE_DEFAULTS = (None, None, None, None, None, None, False, False, False, False)
+_EXPAND_SINGLE_DEFAULTS = (None, None, None, None, None, None, None, False, False, False)
 
 
 class _SplitKPlan:
