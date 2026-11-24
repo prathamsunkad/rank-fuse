@@ -424,13 +424,17 @@ def multi_split_k(h_in: int, T: int, tiled: bool, programs: int, num_sms: int) -
 
 def multi_lora_splitk(x: torch.Tensor, W: PagedWeights, token_ranks: torch.Tensor, meta: MultiMeta, *,
                       out: torch.Tensor | None = None, add: bool = False, rank_skip: bool = False,
-                      full_width: bool = False, split_k: int | None = None) -> torch.Tensor:
+                      full_width: bool = False, full_rows: bool = False, split_k: int | None = None) -> torch.Tensor:
     """out (+)= the multi-adapter delta over meta's tile table, on rankfuse_fused.splitk_pass (MULTI).
 
     Launch settings: _config at meta.r_pad (warps, BH, stages, tiled-expand BN / warps, column-loop
     expand); the token block is meta.bm, since the tile table holds at most bm tokens per tile.
-    rank_skip: each tile branches to its own width bucket (RF2-MA); full_width: every tile at
-    meta.r_pad through the same binary (the control for rank_skip).
+    Every tile reads its tokens' ranks from token_ranks when it runs (also at CUDA-graph replay) and
+    loads only rank rows below their maximum (fewer bytes). rank_skip: each tile also runs at that
+    maximum's width bucket (RF2-MA: less MMA work). full_width: every tile at meta.r_pad through the
+    same binary (no MMA saving); full_rows: every tile loads all W.r_max rank rows (no byte saving;
+    needs every page resident). full_width + full_rows is the no-skipping control, so
+        bytes saved = t(full_width + full_rows) - t(full_width);  MMA saved = t(full_width) - t(rank_skip).
     """
     _check(x, W, token_ranks)
     out = output_buffer(x, W, out, add)
@@ -439,8 +443,8 @@ def multi_lora_splitk(x: torch.Tensor, W: PagedWeights, token_ranks: torch.Tenso
         return out
     if meta.T != T:
         raise ValueError(f"metadata built for {meta.T} tokens, x has {T}")
-    if full_width and not rank_skip:
-        raise ValueError("full_width is the control for rank_skip; it needs rank_skip=True")
+    if (full_width or full_rows) and not rank_skip:
+        raise ValueError("full_width / full_rows are controls for rank_skip; they need rank_skip=True")
     dev = x.device.index or 0
     num_sms = rf._num_sms(dev)
     S, cap, bm, R = W.n_slices, meta.capacity, meta.bm, meta.r_pad
@@ -454,7 +458,7 @@ def multi_lora_splitk(x: torch.Tensor, W: PagedWeights, token_ranks: torch.Tenso
     return rf.splitk_pass(x, W.A_pool, W.B_pool, token_ranks, out, add, W.slice_sizes, W.scale_table, ws, R, R, split_k,
                           k_per, bm, bh, stages, rank_skip=rank_skip, force_rank=R if full_width else 0,
                           block_n=cfg["bn"], shrink_warps=cfg["shrink_warps"], expand_warps=cfg["expand_warps"],
-                          tiled=tiled, multi=multi_tiles(W, meta.tiles, meta.order))
+                          tiled=tiled, multi=multi_tiles(W, meta.tiles, meta.order), mask_floor=W.r_max if full_rows else 0)
 
 
 def multi_lora_bucketed_splitk(x, W: PagedWeights, token_ranks, plan: "BucketPlan", *, out=None, add=False,
@@ -655,13 +659,14 @@ def rf1_ma(x, W, token_adapter, token_ranks, meta: MultiMeta | None = None, out=
     return multi_lora_splitk(x, W, token_ranks, meta, out=out, add=add)
 
 
-def _skip_impl(mode: str, full_width: bool, doc: str):
+def _skip_impl(mode: str, full_width: bool, doc: str, full_rows: bool = False):
     prepare = _meta_prepare(mode)
 
     def fn(x, W, token_adapter, token_ranks, meta: MultiMeta | None = None, out=None, add=False):
         if meta is None:
             meta = prepare(x, W, token_adapter, token_ranks)["meta"]
-        return multi_lora_splitk(x, W, token_ranks, meta, out=out, add=add, rank_skip=True, full_width=full_width)
+        return multi_lora_splitk(x, W, token_ranks, meta, out=out, add=add, rank_skip=True, full_width=full_width,
+                                 full_rows=full_rows)
 
     fn.__doc__ = doc
     return fn, prepare
@@ -670,13 +675,19 @@ def _skip_impl(mode: str, full_width: bool, doc: str):
 # RF2-MA strategy (i): RANK_SKIP inside multi-adapter tiles, on the shared kernels.
 for _name, _mode, _fw, _doc in (
     ("rf2_ma_splitk", "rank_sorted", False, "RF2-MA: sort by (adapter, rank); each tile at its own width bucket (RANK_SKIP)."),
-    ("rf2_ma_splitk_fw", "rank_sorted", True, "rf2_ma_splitk's binary with every tile at the batch width (control)."),
+    ("rf2_ma_splitk_fw", "rank_sorted", True,
+     "rf2_ma_splitk's binary with every tile at the batch width: rank rows still masked per tile (bytes saved, no MMA saved)."),
     ("rf2_ma_widths", "adapter_bucket", False,
      "RF2-MA: groups of (adapter, width bucket), so no tile spans two widths; each tile at its own bucket."),
     ("rf2_ma_segment", "segment", False, "RF2-MA segment: batch order, tiles = runs of one adapter, RANK_SKIP."),
 ):
     _fn, _prep = _skip_impl(_mode, _fw, _doc)
     register_multi(_name, prepare=_prep)(_fn)
+
+_fn, _prep = _skip_impl("rank_sorted", True, "rf2_ma_splitk's binary with no skipping at all: every tile at the batch width "
+                        "and every rank row loaded (the control for bytes vs MMA; needs every page resident).", full_rows=True)
+register_multi("rf2_ma_splitk_full", prepare=_prep, check=lambda W: None if bool((W.page_table >= 0).all())
+               else "needs every page resident")(_fn)
 
 
 for _name, _mode, _doc in (

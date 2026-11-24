@@ -165,3 +165,41 @@ evaluation batches.
   `_config(r_pad, T)["bm"]` when no bm is passed.
 * Should the many-adapter split-K rule stay if the A100 shows no gain? Proposed: keep it only for
   the (shape, T) ranges where it wins, as an entry next to `tuned_a100.py`.
+
+## 8. Status (2026-11-24)
+
+The plan above is implemented on `pratham/newmultiadapter`:
+
+* **`2c30e56`:** the `MULTI` mode in the shared kernels. With `MULTI` off, the single-adapter PTX is
+  identical to origin/main for all 143 split-K specializations. RF1-MA and RF2-MA run on
+  `splitk_pass` and are bitwise equal to their `*_legacy` versions.
+* **Next commit:** rank skipping reads per-token ranks at run time, as in Tony's `RANK_SKIP`.
+
+How rank skipping now works, which differs from section 2's "`r_limit` becomes per tile":
+
+* Each tile loads its tokens' ranks from `token_ranks` when it runs, including at CUDA-graph replay.
+* `tile_rank` is their maximum.
+* Rank rows `>= tile_rank` are not loaded. This saves bytes, in every variant including `rf1_ma`.
+* With `RANK_SKIP`, the tile runs at the bucket of `max(tile_rank, force_rank)`. This saves MMA work.
+* The tile table's limit column is unused. A captured graph therefore follows rank changes in
+  `token_ranks` without a metadata reload, as long as the adapter grouping is unchanged.
+  `MultiMeta.load_` still handles changes of adapters.
+
+Controls for splitting the saving:
+
+| Variant | MMA width | Rank rows loaded |
+|---|---|---|
+| `rf2_ma_splitk_fw` | batch width | per-tile |
+| `rf2_ma_splitk_full` | batch width | all (needs every page resident) |
+
+Bytes saved = full − fw; MMA saved = fw − `rf2_ma_splitk`.
+
+H100 result for lowering every rank from 64 to 8 after capture
+(`tests/test_multi_v2_replay.py::test_gpu_time_drops_when_ranks_drop_after_capture`):
+
+| Case | `rf1_ma` (bytes only) | RF2-MA |
+|---|---|---|
+| decode, 128 tokens, 64 adapters, 4096² | 0.60× | 0.39–0.46× |
+| prefill, 4096 tokens, 8 adapters | 0.94× | 0.83–0.94× |
+
+In the prefill case, reading x and writing the output dominate.
