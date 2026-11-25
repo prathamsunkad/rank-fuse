@@ -635,22 +635,28 @@ def _splitk_shrink_multi(x_ptr, a_ptr, ranks_ptr, order_ptr, ws_ptr, ws_row0, T,
     tile = tl.program_id(0)
     pid_k = tl.program_id(1)
     pid_s = tl.program_id(2)
+    # Every tile field and the slice offset are loaded together, before any branch: one round trip, not a chain.
     adapter = tl.load(tiles_ptr + tile * 5)
+    start = tl.load(tiles_ptr + tile * 5 + 1)
     length = tl.load(tiles_ptr + tile * 5 + 2)
+    limit = tl.load(tiles_ptr + tile * 5 + 3)
+    first = tl.load(tiles_ptr + tile * 5 + 4)
+    a_off = tl.load(mslice_ptr + pid_s * 5 + 2)
     if length > 0:
         if adapter >= 0:
-            start = tl.load(tiles_ptr + tile * 5 + 1)
             pos = start + tl.arange(0, BM)
             row_ok = tl.arange(0, BM) < length
-            tok = _tile_tokens(tiles_ptr, tile, order_ptr, pos, row_ok, BM=BM)
+            if first >= 0:  # consecutive tokens: no load of `order`
+                tok = first + tl.arange(0, BM)
+            else:
+                tok = tl.load(order_ptr + pos, mask=row_ok, other=0)
             if TOKEN_RANKS:
                 ranks = tl.load(ranks_ptr + tok, mask=row_ok, other=0)
                 tile_rank = tl.max(ranks, axis=0).to(tl.int32)
             else:
-                tile_rank = tl.load(tiles_ptr + tile * 5 + 3)
+                tile_rank = limit
             if tile_rank > 0:
                 lim = tl.maximum(tile_rank, mask_floor)
-                a_off = tl.load(mslice_ptr + pid_s * 5 + 2)
                 h_lo = pid_k * K_PER
                 ws_k = ws_ptr + pid_s * WS_SLICE + (pid_k * T + ws_row0) * R_PAD
                 _splitk_shrink_tile_multi(x_ptr, a_ptr, pt_ptr, adapter, PT_LD, FRAME, a_off, ws_k, tok, pos, row_ok, H_IN,
@@ -701,26 +707,32 @@ def _splitk_expand_multi(ws_ptr, ranks_ptr, order_ptr, scale_ptr, b_ptr, out_ptr
         col_base = tl.program_id(1) * cols_per_prog
     else:
         col_base = tl.program_id(1) * BN
+    # Every tile field and the slice offsets are loaded together, before any branch.
+    adapter = tl.load(tiles_ptr + tile * 5)
+    start = tl.load(tiles_ptr + tile * 5 + 1)
     length = tl.load(tiles_ptr + tile * 5 + 2)
+    limit = tl.load(tiles_ptr + tile * 5 + 3)
+    first = tl.load(tiles_ptr + tile * 5 + 4)
+    b_off = tl.load(mslice_ptr + pid_s * 5 + 3)
+    b_ld = tl.load(mslice_ptr + pid_s * 5 + 4)
     if length > 0:  # rows past the step's tile count are empty
         if col_base < n_cols:
-            adapter = tl.load(tiles_ptr + tile * 5)
-            start = tl.load(tiles_ptr + tile * 5 + 1)
             pos = start + tl.arange(0, BM)
             row_ok = tl.arange(0, BM) < length
-            tok = _tile_tokens(tiles_ptr, tile, order_ptr, pos, row_ok, BM=BM)
+            if first >= 0:
+                tok = first + tl.arange(0, BM)
+            else:
+                tok = tl.load(order_ptr + pos, mask=row_ok, other=0)
             ranks = tl.load(ranks_ptr + tok, mask=row_ok, other=0)
             if TOKEN_RANKS:
                 tile_rank = tl.where(adapter >= 0, tl.max(ranks, axis=0).to(tl.int32), 0)
             else:
-                tile_rank = tl.load(tiles_ptr + tile * 5 + 3)
+                tile_rank = limit
             if tile_rank == 0:
                 if not ADD_OUT:
                     _splitk_zero_part(out_ptr, tok, row_ok, n_cols, out_col0, OUT_STRIDE, col_base, cols_per_prog, BM=BM, BN=BN, LOOP=LOOP)
             else:
                 lim = tl.maximum(tile_rank, mask_floor)
-                b_off = tl.load(mslice_ptr + pid_s * 5 + 3)
-                b_ld = tl.load(mslice_ptr + pid_s * 5 + 4)
                 ws_s = ws_ptr + pid_s * WS_SLICE + ws_row0 * R_PAD
                 _splitk_expand_tile_multi(ws_s, scale_ptr, b_ptr, pt_ptr, adapter, PT_LD, FRAME, b_off, b_ld, SCALE_LD, out_ptr,
                                           tok, pos, row_ok, ranks, tile_rank, lim, force_rank, T, OUT_STRIDE, SPLIT_K, out_col0,
