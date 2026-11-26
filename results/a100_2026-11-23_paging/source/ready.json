@@ -1,0 +1,212 @@
+[
+ {
+  "model": "0.5B",
+  "r_max": 256,
+  "rank": 16,
+  "mode": "prefix",
+  "pages": 1,
+  "bytes": 17596416,
+  "ready_wall_median_ms": 1.636126427911222,
+  "ready_dev_median_ms": 1.6172639727592468
+ },
+ {
+  "model": "0.5B",
+  "r_max": 256,
+  "rank": 16,
+  "mode": "whole",
+  "pages": 16,
+  "bytes": 281542656,
+  "ready_wall_median_ms": 22.281217039562762,
+  "ready_dev_median_ms": 22.265040397644043
+ },
+ {
+  "model": "0.5B",
+  "r_max": 256,
+  "rank": 32,
+  "mode": "prefix",
+  "pages": 2,
+  "bytes": 35192832,
+  "ready_wall_median_ms": 3.3619465539231896,
+  "ready_dev_median_ms": 3.3468639850616455
+ },
+ {
+  "model": "0.5B",
+  "r_max": 256,
+  "rank": 32,
+  "mode": "whole",
+  "pages": 16,
+  "bytes": 281542656,
+  "ready_wall_median_ms": 11.003155843354762,
+  "ready_dev_median_ms": 10.987744331359863
+ },
+ {
+  "model": "0.5B",
+  "r_max": 256,
+  "rank": 64,
+  "mode": "prefix",
+  "pages": 4,
+  "bytes": 70385664,
+  "ready_wall_median_ms": 2.779940376058221,
+  "ready_dev_median_ms": 2.7647520303726196
+ },
+ {
+  "model": "0.5B",
+  "r_max": 256,
+  "rank": 64,
+  "mode": "whole",
+  "pages": 16,
+  "bytes": 281542656,
+  "ready_wall_median_ms": 11.003741878084838,
+  "ready_dev_median_ms": 10.988383769989014
+ },
+ {
+  "model": "0.5B",
+  "r_max": 256,
+  "rank": 128,
+  "mode": "prefix",
+  "pages": 8,
+  "bytes": 140771328,
+  "ready_wall_median_ms": 5.520399427041411,
+  "ready_dev_median_ms": 5.504143953323364
+ },
+ {
+  "model": "0.5B",
+  "r_max": 256,
+  "rank": 128,
+  "mode": "whole",
+  "pages": 16,
+  "bytes": 281542656,
+  "ready_wall_median_ms": 11.005701031535864,
+  "ready_dev_median_ms": 10.990799903869629
+ },
+ {
+  "model": "0.5B",
+  "r_max": 256,
+  "rank": 256,
+  "mode": "prefix",
+  "pages": 16,
+  "bytes": 281542656,
+  "ready_wall_median_ms": 10.991198476403952,
+  "ready_dev_median_ms": 10.976319789886475
+ },
+ {
+  "model": "0.5B",
+  "r_max": 256,
+  "rank": 256,
+  "mode": "whole",
+  "pages": 16,
+  "bytes": 281542656,
+  "ready_wall_median_ms": 10.98675443790853,
+  "ready_dev_median_ms": 10.971680164337158
+ },
+ {
+  "model": "0.5B",
+  "mode": "resident_fast_path",
+  "ensure_host_us": 12.627254938706756
+ },
+ {
+  "model": "7B",
+  "r_max": 256,
+  "rank": 16,
+  "mode": "prefix",
+  "pages": 1,
+  "bytes": 80740352,
+  "ready_wall_median_ms": 3.137870109640062,
+  "ready_dev_median_ms": 3.1229119300842285
+ },
+ {
+  "model": "7B",
+  "r_max": 256,
+  "rank": 16,
+  "mode": "whole",
+  "pages": 16,
+  "bytes": 1291845632,
+  "ready_wall_median_ms": 49.42456597927958,
+  "ready_dev_median_ms": 49.40884780883789
+ },
+ {
+  "model": "7B",
+  "r_max": 256,
+  "rank": 32,
+  "mode": "prefix",
+  "pages": 2,
+  "bytes": 161480704,
+  "ready_wall_median_ms": 6.218650029040873,
+  "ready_dev_median_ms": 6.203871965408325
+ },
+ {
+  "model": "7B",
+  "r_max": 256,
+  "rank": 32,
+  "mode": "whole",
+  "pages": 16,
+  "bytes": 1291845632,
+  "ready_wall_median_ms": 49.42907998338342,
+  "ready_dev_median_ms": 49.41339302062988
+ },
+ {
+  "model": "7B",
+  "r_max": 256,
+  "rank": 64,
+  "mode": "prefix",
+  "pages": 4,
+  "bytes": 322961408,
+  "ready_wall_median_ms": 12.382633984088898,
+  "ready_dev_median_ms": 12.367424011230469
+ },
+ {
+  "model": "7B",
+  "r_max": 256,
+  "rank": 64,
+  "mode": "whole",
+  "pages": 16,
+  "bytes": 1291845632,
+  "ready_wall_median_ms": 49.41932647489011,
+  "ready_dev_median_ms": 49.403615951538086
+ },
+ {
+  "model": "7B",
+  "r_max": 256,
+  "rank": 128,
+  "mode": "prefix",
+  "pages": 8,
+  "bytes": 645922816,
+  "ready_wall_median_ms": 24.72579653840512,
+  "ready_dev_median_ms": 24.710031509399414
+ },
+ {
+  "model": "7B",
+  "r_max": 256,
+  "rank": 128,
+  "mode": "whole",
+  "pages": 16,
+  "bytes": 1291845632,
+  "ready_wall_median_ms": 49.395450041629374,
+  "ready_dev_median_ms": 49.379425048828125
+ },
+ {
+  "model": "7B",
+  "r_max": 256,
+  "rank": 256,
+  "mode": "prefix",
+  "pages": 16,
+  "bytes": 1291845632,
+  "ready_wall_median_ms": 49.38990960363299,
+  "ready_dev_median_ms": 49.374305725097656
+ },
+ {
+  "model": "7B",
+  "r_max": 256,
+  "rank": 256,
+  "mode": "whole",
+  "pages": 16,
+  "bytes": 1291845632,
+  "ready_wall_median_ms": 49.40039454959333,
+  "ready_dev_median_ms": 49.38448143005371
+ },
+ {
+  "model": "7B",
+  "mode": "resident_fast_path",
+  "ensure_host_us": 12.204881524667144
+ }
+]
