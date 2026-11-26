@@ -1,0 +1,26 @@
+# Smoke run of rf2_mixed_a100_r*.yaml (dev GPUs only, not for reporting): one seed, 256 decodes, one
+# rank mix, every step type at r_max 64 / 128 / 256, both orders, every implementation including B3/B4.
+name: rf2_mixed_a100_smoke
+impls: [rf1_fused, rf2_segment, rf2_index, rf2_ranges, rf2_bucketed_tuned, b1_padded, b3_vllm, b4_slora_copies, b4_slora_shared, rf1_fused]
+timing: graph
+mode: add
+warmup: 5
+reps: 10
+graph_replays: 10
+flush_l2: true
+common: &common
+  num_requests: 256
+  tokens_per_request: 1
+  h_in: 4096
+  h_out: 4096
+  r_max: [64, 128, 256]
+  tiers: pow2
+  dist: zipf_1
+  request_order: [random, sorted]
+  dtype: fp16
+  seed: 0
+grid:
+  - <<: *common
+  - <<: *common
+    lengths: [chunked_2048_2048, chunked_8192_8192, serving_1_2048, serving_2_8192, chunked_2048_512, chunked_8192_512, chunked_8192_2048]
+    prefill_dist: [null, all_max]

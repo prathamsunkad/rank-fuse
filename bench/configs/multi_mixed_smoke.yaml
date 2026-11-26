@@ -1,0 +1,20 @@
+# Smoke run of multi_mixed_a100_r*.yaml (dev GPUs only, not for reporting).
+name: multi_mixed_smoke
+impls: [rf1_ma, rf1_ma_legacy, rf2_ma_splitk, rf2_ma_widths, rf2_ma_segment, rf2_ma_bucketed, rf2_ma_splitk_legacy, rf2_ma_segment_legacy, rf2_ma_bucketed_legacy, b1_multi, b3_multi, b4_multi_copies, b4_multi_shared]
+warmup: 5
+reps: 5
+graph_replays: 10
+flush_l2: true
+common: &common
+  num_decodes: 256
+  num_adapters: [4, 64]
+  zipf_alpha: 1.0
+  dist: zipf_1
+  r_max: [64, 128, 256]
+  seed: 0
+grid:
+  - <<: *common
+    lengths: null
+  - <<: *common
+    lengths: [chunked_2048_2048, chunked_8192_8192, serving_1_2048, serving_2_8192, chunked_2048_512, chunked_8192_512, chunked_8192_2048]
+    prefill_dist: [null, all_max]

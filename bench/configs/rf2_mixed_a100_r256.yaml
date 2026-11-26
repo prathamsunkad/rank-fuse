@@ -1,0 +1,39 @@
+# Mixed (chunked-prefill) steps on the A100 80GB PCIe, r_max 256: Tony's rf2_mixed.yaml grid (four step
+# types, budgets 2048 and 8192, 32 / 256 decodes, both request orders, 3 seeds) with B3 (vLLM 0.32
+# _lora_shrink/_lora_expand, padded fixed slots) and B4 (S-LoRA's bgmv CUDA kernel, applied to every
+# token, prompts included). Run with bench/run_mixed_sweep.py (B4 at widths 128/256). B0 is the
+# correctness oracle (tests/test_mixed_single.py), not timed: it is a per-token loop without out=/add=.
+# rf1_fused is listed twice (impl_pass 0/1) to measure run-to-run noise, as in rf2_mixed.yaml.
+# Sorting: rf2_segment / rf2_ranges need rank-sorted rows; request_order "sorted" builds the batch
+# sorted (rankfuse.workloads.make_batch), before timing, and every implementation is timed on that same
+# batch. rf2_index sorts in its prepare (outside the timed graph; prepare_us). No sort is timed.
+name: rf2_mixed_a100_r256
+impls: [rf1_fused, rf2_segment, rf2_index, rf2_ranges, rf2_bucketed_tuned, b1_padded, b3_vllm, b4_slora_copies, b4_slora_shared, rf1_fused]
+timing: graph
+mode: add
+warmup: 10
+reps: 30
+graph_replays: 20
+flush_l2: true
+common: &common
+  num_requests: [32, 256]
+  tokens_per_request: 1
+  h_in: 4096
+  h_out: 4096
+  r_max: 256
+  tiers: pow2
+  dist: [skew_low, zipf_1]
+  request_order: [random, sorted]
+  dtype: fp16
+  seed: [0, 1, 2]
+grid:
+  - <<: *common                                         # 1. decode only
+  - <<: *common                                         # 2. one prompt fills the budget
+    lengths: [chunked_2048_2048, chunked_8192_8192]
+    prefill_dist: [null, skew_high, all_max]
+  - <<: *common                                         # 3. short prompts, budget not filled
+    lengths: [serving_1_2048, serving_2_8192]
+    prefill_dist: [null, skew_high, all_max]
+  - <<: *common                                         # 4. many partial prefills
+    lengths: [chunked_2048_512, chunked_8192_512, chunked_8192_2048]
+    prefill_dist: [null, skew_high, all_max]

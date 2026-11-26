@@ -1,0 +1,32 @@
+# Multi-adapter mixed (chunked-prefill) steps on the A100 80GB PCIe, r_max 256 (bench/run_multi_mixed_sweep.py,
+# steps from rankfuse/mixed_multi.py): the four step types of rf2_mixed.yaml at budgets 2048 and 8192,
+# 32 / 256 decodes, each request with an adapter (Zipf popularity alpha 0.8 / 1.0 / 1.2 over 4 / 16 / 64
+# adapters) and its own rank (decodes: skew_low or zipf_1; prompts: the same mix, or all at r_max).
+# 4096 x 4096, fp16, shuffled pages, 3 seeds. Batches are in arrival order; each kernel's sort or grouping
+# is in its prepare, outside the timed graph. B4 = "S-LoRA bgmv applied to all tokens" (S-LoRA itself
+# runs prompts through a separate prefill kernel).
+# Kernels (commit 2c30e56, kernels-v2 Phase B): rf1_ma / rf2_ma_* = the new versions on Tony's shared
+# split-K kernels (splitk_pass, MULTI); *_legacy = the Stage 2 kernels, kept for comparison.
+name: multi_mixed_a100_r256
+impls: [rf1_ma, rf1_ma_legacy, rf2_ma_splitk, rf2_ma_widths, rf2_ma_segment, rf2_ma_bucketed, rf2_ma_splitk_legacy, rf2_ma_segment_legacy, rf2_ma_bucketed_legacy, b1_multi, b3_multi, b4_multi_copies, b4_multi_shared]
+warmup: 10
+reps: 7
+graph_replays: 20
+flush_l2: true
+common: &common
+  num_decodes: [32, 256]
+  num_adapters: [4, 16, 64]
+  zipf_alpha: [0.8, 1.0, 1.2]
+  dist: [skew_low, zipf_1]
+  r_max: 256
+  h_in: 4096
+  h_out: 4096
+  dtype: fp16
+  pages: shuffled
+  seed: [0, 1, 2]
+grid:
+  - <<: *common                                         # 1. decode only
+    lengths: null
+  - <<: *common                                         # 2-4. one prompt fills / short prompts / partial prefills
+    lengths: [chunked_2048_2048, chunked_8192_8192, serving_1_2048, serving_2_8192, chunked_2048_512, chunked_8192_512, chunked_8192_2048]
+    prefill_dist: [null, all_max]
