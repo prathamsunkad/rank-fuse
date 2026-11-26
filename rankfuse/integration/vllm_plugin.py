@@ -76,7 +76,12 @@ def register() -> None:
     with _LOCK:
         if _DONE:
             return
-        _patch_all()
+        if os.environ.get("RANKFUSE_MULTI", "0") == "1":  # many adapters (+ RANKFUSE_PAGING=1): vllm_multi.py
+            from rankfuse.integration.vllm_multi import patch_multi
+
+            patch_multi()
+        else:
+            _patch_all()
         _DONE = True
 
 

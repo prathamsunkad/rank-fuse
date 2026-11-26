@@ -1,0 +1,39 @@
+{
+ "with_rank": {
+  "cached_cold_hi": 0,
+  "cached_lo": 0,
+  "cached_hi_after_lo": 0,
+  "cached_hi_repeat": 96,
+  "maxdiff_hi_after_lo_vs_cold": {
+   "first_token_dlp": 0.0,
+   "common_prefix": 16
+  },
+  "maxdiff_hi_repeat_vs_cold": {
+   "first_token_dlp": 0.09058976173400879,
+   "common_prefix": 7
+  },
+  "maxdiff_lo_vs_hi": {
+   "first_token_dlp": Infinity,
+   "common_prefix": 0
+  }
+ },
+ "without_rank": {
+  "cached_cold_hi": 0,
+  "cached_lo": 0,
+  "cached_hi_after_lo": 96,
+  "cached_hi_repeat": 96,
+  "maxdiff_hi_after_lo_vs_cold": {
+   "first_token_dlp": Infinity,
+   "common_prefix": 0
+  },
+  "maxdiff_hi_repeat_vs_cold": {
+   "first_token_dlp": Infinity,
+   "common_prefix": 0
+  },
+  "maxdiff_lo_vs_hi": {
+   "first_token_dlp": Infinity,
+   "common_prefix": 0
+  }
+ },
+ "ok": true
+}

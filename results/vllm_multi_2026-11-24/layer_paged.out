@@ -1,0 +1,60 @@
+{
+ "ok": true,
+ "checked_calls": 192,
+ "stats": {
+  "qkv_proj/low": {
+   "max_rel": 0.00526342828053559,
+   "calls": 42,
+   "tokens": 6588,
+   "zero_rows_max": 0.0
+  },
+  "qkv_proj/full": {
+   "max_rel": 0.004315016279870725,
+   "calls": 48,
+   "tokens": 7524,
+   "zero_rows_max": 0.0
+  },
+  "o_proj/low": {
+   "max_rel": 0.0042497721250821414,
+   "calls": 42,
+   "tokens": 6588,
+   "zero_rows_max": 0.0
+  },
+  "o_proj/full": {
+   "max_rel": 0.004213470966318841,
+   "calls": 48,
+   "tokens": 7524,
+   "zero_rows_max": 0.0
+  },
+  "gate_up_proj/low": {
+   "max_rel": 0.004390525877318643,
+   "calls": 42,
+   "tokens": 6588,
+   "zero_rows_max": 0.0
+  },
+  "gate_up_proj/full": {
+   "max_rel": 0.004537031306390124,
+   "calls": 48,
+   "tokens": 7524,
+   "zero_rows_max": 0.0
+  },
+  "down_proj/low": {
+   "max_rel": 0.005173970537388769,
+   "calls": 42,
+   "tokens": 6588,
+   "zero_rows_max": 0.0
+  },
+  "down_proj/full": {
+   "max_rel": 0.003985956460212684,
+   "calls": 48,
+   "tokens": 7524,
+   "zero_rows_max": 0.0
+  }
+ },
+ "paged": true,
+ "pager": {
+  "frames": 200,
+  "loads": 73,
+  "evictions": 0
+ }
+}

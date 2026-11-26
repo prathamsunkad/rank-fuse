@@ -1,0 +1,56 @@
+{
+ "ok": true,
+ "checked_calls": 216,
+ "stats": {
+  "qkv_proj/low": {
+   "max_rel": 0.00423074100355467,
+   "calls": 46,
+   "tokens": 6574,
+   "zero_rows_max": 0.0
+  },
+  "qkv_proj/full": {
+   "max_rel": 0.003910055115956669,
+   "calls": 46,
+   "tokens": 7502,
+   "zero_rows_max": 0.0
+  },
+  "o_proj/low": {
+   "max_rel": 0.004695294405556135,
+   "calls": 46,
+   "tokens": 6574,
+   "zero_rows_max": 0.0
+  },
+  "o_proj/full": {
+   "max_rel": 0.005465863861717617,
+   "calls": 46,
+   "tokens": 7502,
+   "zero_rows_max": 0.0
+  },
+  "gate_up_proj/low": {
+   "max_rel": 0.004482219392741823,
+   "calls": 46,
+   "tokens": 6574,
+   "zero_rows_max": 0.0
+  },
+  "gate_up_proj/full": {
+   "max_rel": 0.004116511295300765,
+   "calls": 46,
+   "tokens": 7502,
+   "zero_rows_max": 0.0
+  },
+  "down_proj/low": {
+   "max_rel": 0.005591463241080886,
+   "calls": 46,
+   "tokens": 6574,
+   "zero_rows_max": 0.0
+  },
+  "down_proj/full": {
+   "max_rel": 0.004024926511611926,
+   "calls": 46,
+   "tokens": 7502,
+   "zero_rows_max": 0.0
+  }
+ },
+ "paged": false,
+ "pager": null
+}

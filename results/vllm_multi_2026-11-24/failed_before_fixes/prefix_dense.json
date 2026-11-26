@@ -1,0 +1,59 @@
+{
+ "tokens": {
+  "r128": [
+   576,
+   6008,
+   5711,
+   39020,
+   311,
+   5508,
+   12499,
+   39489,
+   323,
+   3015,
+   1119,
+   33223,
+   323,
+   23552,
+   13,
+   576
+  ],
+  "r8": [
+   1084,
+   594,
+   1075,
+   264,
+   6008,
+   7826,
+   323,
+   17387,
+   1181,
+   1828,
+   3607,
+   13,
+   576,
+   6008,
+   5711,
+   39020
+  ]
+ },
+ "with_rank": {
+  "cached_cold_hi": 0,
+  "cached_lo": 0,
+  "cached_hi_after_lo": 0,
+  "cached_hi_repeat": 96,
+  "maxdiff_hi_after_lo_vs_cold": 0.0,
+  "maxdiff_hi_repeat_vs_cold": 1.9232395440340042,
+  "maxdiff_lo_vs_hi": 1.5764034539461136
+ },
+ "without_rank": {
+  "cached_cold_hi": 0,
+  "cached_lo": 0,
+  "cached_hi_after_lo": 96,
+  "cached_hi_repeat": 96,
+  "maxdiff_hi_after_lo_vs_cold": 2.1228137174621224,
+  "maxdiff_hi_repeat_vs_cold": 2.1228137174621224,
+  "maxdiff_lo_vs_hi": 1.5764034539461136
+ },
+ "ok": false
+}
