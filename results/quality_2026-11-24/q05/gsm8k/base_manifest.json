@@ -1,0 +1,9 @@
+[
+ {
+  "name": "base",
+  "base": true,
+  "tasks": {
+   "gsm8k": 8
+  }
+ }
+]

@@ -1,0 +1,10 @@
+[
+ {
+  "name": "base",
+  "base": true,
+  "tasks": {
+   "arc_challenge": 25,
+   "hellaswag": 10
+  }
+ }
+]

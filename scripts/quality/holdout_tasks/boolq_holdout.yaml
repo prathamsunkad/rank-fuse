@@ -1,0 +1,18 @@
+# lm-eval super_glue/boolq (0.4.9.1) on the BoolQ train hold-out; see build_holdout.py
+task: boolq_holdout
+dataset_path: json
+dataset_name: null
+dataset_kwargs:
+  data_files:
+    holdout: /storage/ice1/4/7/psunkad3/rankfuse/quality_runs/holdout_data/boolq_holdout.jsonl
+output_type: multiple_choice
+test_split: holdout
+doc_to_text: "{{passage}}\nQuestion: {{question}}?\nAnswer:"
+doc_to_target: label
+doc_to_choice: ["no", "yes"]
+metric_list:
+  - metric: acc
+    aggregation: mean
+    higher_is_better: true
+metadata:
+  version: 2.0
