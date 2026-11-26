@@ -28,6 +28,11 @@ from rankfuse.baselines import slora_bgmv as sb
 from rankfuse.multi import MULTI_REGISTRY, PagedWeights, output_buffer, register_multi
 
 NAMES = ("b4_multi_copies", "b4_multi_shared")
+# RankFuse A100 r_max 128/256 (2026-11-23): the multi-adapter B4 also takes delta widths 128 and
+# 256, compiled into slora_ext only with hidden sizes 512 and up (bgmv_config.h); the width must be
+# below both hidden sizes (bgmv_kernel picks expand vs shrink by feat_in < feat_out). Stage 1's B4
+# keeps sb.NARROW_SIZES (r_max <= 64).
+NARROW_SIZES = sb.NARROW_SIZES + (128, 256)
 
 
 def check(W: PagedWeights) -> str | None:
@@ -36,8 +41,11 @@ def check(W: PagedWeights) -> str | None:
     for side, h in (("h_in", W.h_in), ("h_out", W.h_out)):
         if h not in sb.WIDE_SIZES:
             return f"S-LoRA bgmv: {side}={h} is not compiled in (WIDE_SIZES={sb.WIDE_SIZES})"
-    if W.r_max > sb.NARROW_SIZES[-1] or W.r_max % 8:
-        return f"S-LoRA bgmv: r_max={W.r_max} must be a multiple of 8 up to {sb.NARROW_SIZES[-1]}"
+    if W.r_max > NARROW_SIZES[-1] or W.r_max % 8:
+        return f"S-LoRA bgmv: r_max={W.r_max} must be a multiple of 8 up to {NARROW_SIZES[-1]}"
+    width = next(n for n in NARROW_SIZES if n >= W.r_max)
+    if width > sb.NARROW_SIZES[-1] and width >= min(W.h_in, W.h_out):
+        return f"S-LoRA bgmv: delta width {width} must be below h_in and h_out (got {W.h_in} -> {W.h_out})"
     return None
 
 
@@ -50,7 +58,7 @@ def _scales(W: PagedWeights, pa: torch.Tensor, pr: torch.Tensor) -> torch.Tensor
 def pool_copies(W: PagedWeights, pairs: list[tuple[int, int]]):
     """Entries 0..P-1 = the pairs at their true rank (stored at a multiple of 8); entry P = rank 0."""
     dev, dt = W.device, W.dtype
-    width = next(n for n in sb.NARROW_SIZES if n >= W.r_max)
+    width = next(n for n in NARROW_SIZES if n >= W.r_max)
     stored = [-(-r // 8) * 8 for _, r in pairs]
     rows = sum(stored)
     A = torch.zeros(rows + 1, 1, W.h_in, dtype=dt, device=dev)
@@ -79,7 +87,7 @@ def pool_copies(W: PagedWeights, pairs: list[tuple[int, int]]):
 def pool_shared(W: PagedWeights):
     """Adapter a's A_t and B^T stored once at rows a*r_max..; entry a*(r_max+1) + r = (a, r)."""
     dev, dt, N, R = W.device, W.dtype, W.num_adapters, W.r_max
-    width = next(n for n in sb.NARROW_SIZES if n >= R)
+    width = next(n for n in NARROW_SIZES if n >= R)
     A = W.A_dense[:, 0].reshape(N * R, 1, W.h_in).contiguous()
     B = W.B_dense[:, 0, :, : W.h_out].transpose(1, 2).contiguous().reshape(N * R, 1, W.h_out)
     pa = torch.arange(N, device=dev).repeat_interleave(R + 1)

@@ -37,6 +37,13 @@ from rankfuse.multi import MULTI_REGISTRY, MultiWorkload, load_all, make_batch, 
 
 L2_FLUSH_BYTES = 256 * 2**20
 HBM_BYTES_PER_S = 4.8e12  # H200 spec sheet
+# Spec-sheet DRAM bandwidth by device name (ideal_us); H200 when the name is not listed.
+HBM_BY_GPU = {"NVIDIA H200": 4.8e12, "NVIDIA A100 80GB PCIe": 1.935e12, "NVIDIA A100-SXM4-80GB": 2.039e12,
+              "NVIDIA A100-PCIE-40GB": 1.555e12, "NVIDIA A100-SXM4-40GB": 1.555e12}
+
+
+def hbm_bytes_per_s() -> float:
+    return HBM_BY_GPU.get(torch.cuda.get_device_name(), HBM_BYTES_PER_S)
 
 
 def time_graph(fn, warmup: int, reps: int, replays: int, flush_l2: bool, reset=None) -> list[float]:
@@ -94,7 +101,7 @@ def batch_stats(W, ta: torch.Tensor, tr: torch.Tensor) -> dict:
         active_adapters=len(lim), distinct_pairs=int(pairs),
         tokens_per_active_adapter=float(live.sum()) / max(len(lim), 1),
         batch_max_rank=int(rk.max()) if T else 0, mean_rank=float(rk.float().mean()) if T else 0.0,
-        ideal_bytes=weight_bytes + act_bytes, ideal_us=(weight_bytes + act_bytes) / HBM_BYTES_PER_S * 1e6,
+        ideal_bytes=weight_bytes + act_bytes, ideal_us=(weight_bytes + act_bytes) / hbm_bytes_per_s() * 1e6,
     )
 
 
@@ -103,12 +110,25 @@ def workloads(cfg: dict):
     g = cfg["grid"]
     keys = ["num_adapters", "popularity", "dist", "pages"]
     vals = [g[k] if isinstance(g.get(k), list) else [g.get(k, MultiWorkload.__dataclass_fields__[k].default)] for k in keys]
-    for (label, (req, tpr)), shape, combo in itertools.product(cfg["tokens"].items(), shapes, itertools.product(*vals)):
+    seeds = g.get("seed", 0)
+    seeds = seeds if isinstance(seeds, list) else [seeds]
+    # "order: weights" (A100 sweeps): seed, shape, adapters, pages outermost, so one set of weights
+    # serves every token count, popularity and rank mix (the default regenerates per token label).
+    if cfg.get("order") == "weights":
+        for seed, shape, n, pages in itertools.product(seeds, shapes, vals[0], vals[3]):
+            h_in, h_out = shapes[shape]
+            for (label, (req, tpr)), pop, dist in itertools.product(cfg["tokens"].items(), vals[1], vals[2]):
+                yield label, shape, MultiWorkload(req, tpr, n, popularity=pop, dist=dist, h_in=h_in, h_out=h_out,
+                                                  r_max=g.get("r_max", 64), dtype=g.get("dtype", "fp16"),
+                                                  seed=seed, pages=pages)
+        return
+    for seed, (label, (req, tpr)), shape, combo in itertools.product(seeds, cfg["tokens"].items(), shapes,
+                                                                     itertools.product(*vals)):
         h_in, h_out = shapes[shape]
         p = dict(zip(keys, combo))
         yield label, shape, MultiWorkload(req, tpr, p["num_adapters"], popularity=p["popularity"], dist=p["dist"],
                                           h_in=h_in, h_out=h_out, r_max=g.get("r_max", 64), dtype=g.get("dtype", "fp16"),
-                                          seed=g.get("seed", 0), pages=p["pages"])
+                                          seed=seed, pages=p["pages"])
 
 
 def stage1_rf1(W, x, tr):
@@ -188,12 +208,15 @@ def run_sweep(cfg: dict, out_path: Path, only_impls=None) -> None:
                 kw = fn = None
 
 
-def run_ncu(name: str, shape: str, num_adapters: int, requests: int, tpr: int, dist: str, pop: str, pages: str) -> None:
+def run_ncu(name: str, shape: str, num_adapters: int, requests: int, tpr: int, dist: str, pop: str, pages: str,
+            r_max: int = 64) -> None:
     """One prepared call, profiled between cudaProfilerStart/Stop (use ncu --profile-from-start off)."""
     load_all(include_slora=True)
-    shapes = {"4096x4096": (4096, 4096), "q_o": (896, 896), "k_v": (896, 128), "gate_up": (896, 4864), "down": (4864, 896)}
+    shapes = {"4096x4096": (4096, 4096), "q_o": (896, 896), "k_v": (896, 128), "gate_up": (896, 4864), "down": (4864, 896),
+              "q7_o": (3584, 3584), "kv7": (3584, 512), "gate_up7": (3584, 18944), "down7": (18944, 3584)}
     h_in, h_out = shapes[shape]
-    w = MultiWorkload(requests, tpr, num_adapters, popularity=pop, dist=dist, h_in=h_in, h_out=h_out, pages=pages)
+    w = MultiWorkload(requests, tpr, num_adapters, popularity=pop, dist=dist, h_in=h_in, h_out=h_out, pages=pages,
+                      r_max=r_max)
     W = make_weights(w, "cuda")
     x, ta, tr = make_batch(w)
     impl = MULTI_REGISTRY[name]
@@ -206,7 +229,7 @@ def run_ncu(name: str, shape: str, num_adapters: int, requests: int, tpr: int, d
     impl(x, W, ta, tr, out=out, add=True, **kw)
     torch.cuda.synchronize()
     torch.cuda.cudart().cudaProfilerStop()
-    print(json.dumps(dict(impl=name, shape=shape, num_adapters=num_adapters, requests=requests,
+    print(json.dumps(dict(impl=name, shape=shape, num_adapters=num_adapters, requests=requests, r_max=r_max,
                           tokens_per_request=tpr, dist=dist, popularity=pop, pages=pages,
                           prepared=list(kw), **batch_stats(W, ta, tr))), flush=True)
 
@@ -218,10 +241,11 @@ def main() -> None:
     p.add_argument("--impls", default=None, help="comma-separated subset of the config's impls")
     p.add_argument("--ncu", nargs="+", metavar="ARG",
                    help="impl shape num_adapters requests tokens_per_request [dist popularity pages]")
+    p.add_argument("--r-max", type=int, default=64, help="r_max of the --ncu call")
     a = p.parse_args()
     if a.ncu:
         args = a.ncu + ["uniform", "uniform", "shuffled"][len(a.ncu) - 5:]
-        run_ncu(args[0], args[1], int(args[2]), int(args[3]), int(args[4]), *args[5:8])
+        run_ncu(args[0], args[1], int(args[2]), int(args[3]), int(args[4]), *args[5:8], r_max=a.r_max)
         return
     cfg = yaml.safe_load(Path(a.config).read_text())
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")

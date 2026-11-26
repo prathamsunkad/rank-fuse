@@ -1,0 +1,37 @@
+# A100 80GB PCIe main sweep at r_max 256 (bench/run_multi_sweep.py): multi_main.yaml's grid plus the
+# Qwen2.5-7B projections and 3 seeds. Tiers 1, 2, 4, ..., 256 (default_tiers). "order: weights" puts
+# seed / shape / adapters outermost so one set of weights serves every token count and mix.
+# B4 at k_v (896 -> 128) is skipped for r_max >= 128 (S-LoRA bgmv: rank width must be below h_out).
+name: multi-a100-r256
+order: weights
+impls: [rf1_ma, rf2_ma_splitk, rf2_ma_segment, rf2_ma_bucketed, b1_multi, b3_multi, b4_multi_copies, b4_multi_shared, stage1_rf1_fused]
+warmup: 10
+reps: 7
+graph_replays: 20
+flush_l2: true
+shapes:            # projection: [h_in, h_out]
+  4096x4096: [4096, 4096]
+  q_o: [896, 896]
+  k_v: [896, 128]
+  gate_up: [896, 4864]
+  down: [4864, 896]
+  q7_o: [3584, 3584]
+  kv7: [3584, 512]
+  gate_up7: [3584, 18944]
+  down7: [18944, 3584]
+tokens:            # label: [num_requests, tokens_per_request]
+  decode-1: [1, 1]
+  decode-8: [8, 1]
+  decode-32: [32, 1]
+  decode-128: [128, 1]
+  decode-256: [256, 1]
+  prefill-2048: [16, 128]
+  prefill-8192: [32, 256]
+grid:
+  num_adapters: [1, 4, 16, 64, 256]
+  popularity: [uniform, zipf]
+  dist: [uniform, skew_low, all_max]
+  pages: shuffled
+  r_max: 256
+  dtype: fp16
+  seed: [0, 1, 2]

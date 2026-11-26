@@ -1,0 +1,4 @@
+"ID","Process ID","Process Name","Host Name","Kernel Name","Context","Stream","Block Size","Grid Size","Device","CC","dram__bytes_read.sum","dram__bytes_write.sum","gpu__time_duration.sum","launch__block_size","launch__grid_size","launch__registers_per_thread","lts__t_sector_hit_rate.pct","lts__t_sectors.sum"
+"","","","","","","","","","","","Mbyte","byte","us","","","register/thread","%","sector"
+"0","2045557","python3.11","127.0.0.1","_ma_shrink_kernel","1","7","(128, 1, 1)","(11, 8, 1)","0","8.0","7.485952","128.000000","11.552000","128","88","115","6.015094","373660.000000"
+"1","2045557","python3.11","127.0.0.1","_ma_expand_kernel","1","7","(128, 1, 1)","(11, 32, 1)","0","8.0","7.617024","128.000000","17.312000","128","352","112","30.424078","516226.000000"

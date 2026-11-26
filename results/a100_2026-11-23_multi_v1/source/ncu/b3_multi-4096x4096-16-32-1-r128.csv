@@ -1,0 +1,5 @@
+"ID","Process ID","Process Name","Host Name","Kernel Name","Context","Stream","Block Size","Grid Size","Device","CC","dram__bytes_read.sum","dram__bytes_write.sum","gpu__time_duration.sum","launch__block_size","launch__grid_size","launch__registers_per_thread","lts__t_sector_hit_rate.pct","lts__t_sectors.sum"
+"","","","","","","","","","","","Mbyte","Mbyte","us","","","register/thread","%","sector"
+"0","2046599","python3.11","127.0.0.1","void at::vectorized_elementwise_kernel<4, at::FillFunctor<float>, std::array<char *, 1>>(int, T2, T3)","1","7","(128, 1, 1)","(4, 1, 1)","0","8.0","0.003968","0.000000","3.744000","128","4","16","94.891304","4600.000000"
+"1","2046599","python3.11","127.0.0.1","_lora_shrink_kernel","1","7","(128, 1, 1)","(512, 1, 28)","0","8.0","28.604928","1.812480","94.912000","128","14,336","92","18.893705","1662125.000000"
+"2","2046599","python3.11","127.0.0.1","_lora_expand_kernel","1","7","(128, 1, 1)","(32, 1, 28)","0","8.0","28.609152","2.121600","58.688000","128","896","166","41.648408","2298448.000000"

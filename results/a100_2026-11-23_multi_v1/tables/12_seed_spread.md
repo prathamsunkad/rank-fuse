@@ -1,0 +1,12 @@
+### 12. Seed-to-seed spread
+
+Per seed: geometric-mean speedup of RF1-MA over every batch of that seed. Last column: max / min RF1-MA time over the 3 seeds of the same batch (seeds change weights, adapter draws and ranks).
+
+| r_max | baseline | speedup per seed (0 / 1 / 2) | rf1_ma time max/min over seeds |
+|---|---|---|---|
+| 64 | b3_multi | 2.440x / 2.461x / 2.453x | 1.075x (max 1.68x) |
+| 64 | b4_multi_copies | 3.527x / 3.436x / 3.503x | 1.075x (max 1.68x) |
+| 128 | b3_multi | 2.676x / 2.657x / 2.638x | 1.145x (max 2.42x) |
+| 128 | b4_multi_copies | 4.108x / 3.955x / 3.986x | 1.145x (max 2.42x) |
+| 256 | b3_multi | 2.654x / 2.573x / 2.525x | 1.282x (max 6.35x) |
+| 256 | b4_multi_copies | 4.094x / 3.851x / 3.844x | 1.282x (max 6.35x) |
