@@ -1,0 +1,18 @@
+{
+ "model_load_gib": 14.29,
+ "kv_avail_gib": 102.39,
+ "kv_tokens": 1917184,
+ "max_concurrency": 468.06,
+ "graph_capture_gib": 0.29,
+ "rankfuse_frontend": false,
+ "rankfuse_plugin": false,
+ "rankfuse_rank_skip": null,
+ "rankfuse_modules": null,
+ "startup_s": 258.3033049106598,
+ "system": "base",
+ "engine_args": "--max-model-len 4096 --max-num-seqs 256 --gpu-memory-utilization 0.85 --seed 0",
+ "server_args": [],
+ "env": {
+  "RANKFUSE_VLLM": "0"
+ }
+}

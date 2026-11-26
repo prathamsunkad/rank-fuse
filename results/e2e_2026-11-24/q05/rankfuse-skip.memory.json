@@ -1,0 +1,34 @@
+{
+ "model_load_gib": 1.49,
+ "kv_avail_gib": 64.56,
+ "kv_tokens": 5641728,
+ "max_concurrency": 1377.38,
+ "graph_capture_gib": 0.17,
+ "rankfuse_frontend": true,
+ "rankfuse_plugin": true,
+ "rankfuse_rank_skip": "rf2_index",
+ "rankfuse_modules": "96",
+ "startup_s": 360.43232440948486,
+ "system": "rankfuse-skip",
+ "engine_args": "--max-model-len 4096 --max-num-seqs 256 --gpu-memory-utilization 0.85 --seed 0",
+ "server_args": [
+  "--enable-lora",
+  "--max-lora-rank",
+  "256",
+  "--max-loras",
+  "1",
+  "--lora-modules",
+  "matryoshka-0=/storage/ice1/4/7/psunkad3/rankfuse/adapters/synthetic_r256/qwen2.5-0.5b/matryoshka-0",
+  "--worker-extension-cls",
+  "rankfuse.integration.rank_skip.RankSkipWorkerExtension"
+ ],
+ "env": {
+  "RANKFUSE_VLLM": "1",
+  "RANKFUSE_VLLM_KERNEL": "rf2_index"
+ },
+ "rank_check": {
+  "ok": true,
+  "differs_8_vs_256": true,
+  "full_equals_256": true
+ }
+}

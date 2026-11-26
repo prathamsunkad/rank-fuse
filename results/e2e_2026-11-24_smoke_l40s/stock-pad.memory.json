@@ -1,0 +1,33 @@
+{
+ "model_load_gib": 2.51,
+ "kv_avail_gib": 33.89,
+ "kv_tokens": 2961568,
+ "max_concurrency": 723.04,
+ "graph_capture_gib": 0.4,
+ "rankfuse_frontend": false,
+ "rankfuse_plugin": false,
+ "rankfuse_rank_skip": null,
+ "rankfuse_modules": null,
+ "startup_s": 82.1022617816925,
+ "system": "stock-pad",
+ "engine_args": "--max-model-len 4096 --max-num-seqs 256 --gpu-memory-utilization 0.85 --seed 0",
+ "server_args": [
+  "--enable-lora",
+  "--max-lora-rank",
+  "256",
+  "--max-loras",
+  "6",
+  "--max-cpu-loras",
+  "6",
+  "--lora-modules",
+  "matryoshka-0-r8=/storage/ice1/4/7/psunkad3/rankfuse/adapters/synthetic_r256/qwen2.5-0.5b/matryoshka-0-r8",
+  "matryoshka-0-r16=/storage/ice1/4/7/psunkad3/rankfuse/adapters/synthetic_r256/qwen2.5-0.5b/matryoshka-0-r16",
+  "matryoshka-0-r32=/storage/ice1/4/7/psunkad3/rankfuse/adapters/synthetic_r256/qwen2.5-0.5b/matryoshka-0-r32",
+  "matryoshka-0-r64=/storage/ice1/4/7/psunkad3/rankfuse/adapters/synthetic_r256/qwen2.5-0.5b/matryoshka-0-r64",
+  "matryoshka-0-r128=/storage/ice1/4/7/psunkad3/rankfuse/adapters/synthetic_r256/qwen2.5-0.5b/matryoshka-0-r128",
+  "matryoshka-0-r256=/storage/ice1/4/7/psunkad3/rankfuse/adapters/synthetic_r256/qwen2.5-0.5b/matryoshka-0-r256"
+ ],
+ "env": {
+  "RANKFUSE_VLLM": "0"
+ }
+}
